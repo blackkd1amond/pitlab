@@ -136,3 +136,26 @@ label.f{display:block;margin:10px 0 4px;font-size:13px;font-weight:600;color:var
 .chart div{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;color:var(--muted)}
 .chart i{display:block;width:100%;border-radius:6px 6px 2px 2px;background:var(--acc2);min-height:3px}
 .note{background:#FFF8E6;border-radius:12px;padding:10px 12px;font-size:13px;color:#6B5200;margin:8px 0}
+
+/* обучение от Стрелки */
+#tour{position:fixed;inset:0;z-index:80;display:none}
+#tour.on{display:block}
+.tour-dim{position:absolute;inset:0;background:rgba(20,35,25,.62)}
+.tour-hole{position:fixed;border-radius:16px;box-shadow:0 0 0 9999px rgba(20,35,25,.62),0 0 0 3px #F2C94C inset;
+  transition:all .3s ease;pointer-events:none;animation:tourPulse 1.4s ease-in-out infinite}
+@keyframes tourPulse{50%{box-shadow:0 0 0 9999px rgba(20,35,25,.62),0 0 0 5px #F2C94C inset}}
+.tour-box{position:fixed;left:12px;right:12px;max-width:520px;margin:0 auto;display:flex;gap:10px;align-items:flex-start;
+  background:#fff;border-radius:20px;padding:14px;box-shadow:0 14px 40px rgba(0,0,0,.25);transition:top .3s ease}
+.tour-box.up::before,.tour-box.down::after{content:"";position:absolute;left:var(--ax,50%);width:0;height:0;border:12px solid transparent}
+.tour-box.up::before{top:-22px;border-bottom-color:#fff}
+.tour-box.down::after{bottom:-22px;border-top-color:#fff}
+.tour-pet{flex:0 0 64px;animation:tourHop 1.6s ease-in-out infinite}
+@keyframes tourHop{50%{transform:translateY(-5px)}}
+.tour-body{flex:1;min-width:0}
+.tour-title{display:block;font-size:16px;color:var(--navy);margin-bottom:4px}
+.tour-text{font-size:14px;color:var(--text);margin:0 0 10px}
+.tour-dots{display:flex;gap:5px;margin-bottom:10px}.tour-dots i{width:7px;height:7px;border-radius:50%;background:var(--line)}
+.tour-dots i.on{background:var(--acc);width:18px;border-radius:4px}
+.tour-btns{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.tour-skip{color:var(--muted);font-size:13px;padding:8px 4px}
+.tour-btns .btn{width:auto;padding:10px 22px;margin:0}

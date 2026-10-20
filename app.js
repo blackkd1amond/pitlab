@@ -183,6 +183,9 @@
     const score = [h.breakfast, h.water, h.veg, h.lesson, h.training, h.mood > 0].filter(Boolean).length;
     if (score >= 3) return { mood: "happy", text: "Стрелка счастлива! Так держать 💚" };
     if (score >= 1) return { mood: "ok", text: "Стрелке хорошо. Ещё пара привычек – и она засияет." };
+    const since = (Store.data.profile && Store.data.profile.u) || Date.now();
+    const newbie = Date.now() - since < 2 * 864e5;
+    if (newbie && lastActiveDaysAgo() >= 30) return { mood: "happy", text: "Привет! Я Стрелка. Отметь первую привычку – и я начну расти 🐣" };
     if (lastActiveDaysAgo() >= 2) return { mood: "sad", text: "Стрелка скучает по тебе. Начнём с малого – стакан воды?" };
     return { mood: "ok", text: "Стрелка ждёт завтрак и стакан воды 🙂" };
   }
@@ -656,13 +659,14 @@
         <button class="btn" id="sendCoach">Отправить сводку тренеру</button></div>
       <div class="card"><div class="eyebrow">Оцени ПитЛаб</div><p class="muted">Насколько ПитЛаб тебе полезен?</p>
         <div class="seg" id="rate">${[1, 2, 3, 4, 5].map(i => `<button data-v="${i}" class="${rating === i ? "on" : ""}">${i}</button>`).join("")}</div></div>
-      <div class="card"><button class="btn ghost" id="testA">Пройти тест знаний «после»</button>
+      <div class="card"><button class="btn ghost" id="tourAgain" style="margin-bottom:8px">🐣 Обучение от Стрелки заново</button><button class="btn ghost" id="testA">Пройти тест знаний «после»</button>
         <button class="btn ghost" id="reset" style="margin-top:8px;color:var(--bad)">Удалить все мои данные</button></div>
       <p class="muted small" style="text-align:center">ПитЛаб · команда «Белая стрела» · MVP</p>`;
     $("#edit").onclick = () => renderOnboarding(true);
     $("#sendCoach").onclick = () => sendToBot(s, "отправить сводку тренеру");
     $$("#rate button").forEach(b => b.onclick = () => { Store.set("rating", +b.dataset.v); $$("#rate button").forEach(x => x.classList.toggle("on", x === b)); toast("Спасибо за оценку!"); });
     $("#testA").onclick = () => renderTest("after");
+    $("#tourAgain").onclick = () => startTour();
     $("#reset").onclick = () => {
       const doIt = ok => { if (!ok) return; Store.keys().forEach(k => Store.remove(k)); location.reload(); };
       if (tg && tg.showConfirm) tg.showConfirm("Удалить все данные ПитЛаба? Это нельзя отменить.", doIt); else doIt(confirm("Удалить все данные ПитЛаба?"));
@@ -689,6 +693,69 @@
     $("#back").onclick = () => go("home");
   }
 
+
+  // ---------------------------------------------------------------- Обучение: Стрелка показывает кнопки
+  const TOUR = [
+    { sel: null, title: "Привет, я Стрелка!", text: "Я твой питомец. Расту, когда ты завтракаешь, пьёшь воду и проходишь уроки. Давай покажу, что тут где – это 30 секунд." },
+    { sel: '#tabs [data-tab="home"]', tab: "home", title: "Главная", text: "Здесь я живу. Видно твою норму на сегодня, воду, тренировку и урок дня. Отмечай привычки – я буду расти." },
+    { sel: '#tabs [data-tab="diary"]', tab: "diary", title: "Дневник", text: "Записывай, что ты ел. Я сам посчитаю калории, белки, жиры и углеводы. Можно добавить свой продукт." },
+    { sel: '#tabs [data-tab="plate"]', tab: "plate", title: "Собери тарелку", text: "Половина – овощи, четверть – белок, четверть – гарнир. Собери обед и добавь его в дневник одной кнопкой." },
+    { sel: '#tabs [data-tab="lessons"]', tab: "lessons", title: "Уроки", text: "Короткие уроки по 2 минуты с мини-тестами. За каждый урок – +20 XP мне на рост 💪" },
+    { sel: '#tabs [data-tab="challenges"]', tab: "challenges", title: "Челленджи", text: "Задания на неделю и соревнование с друзьями. Очки – только за привычки, никаких рейтингов по весу." },
+    { sel: "#sosBtn", title: "Нет мотивации", text: "Если опустились руки или сорвался – жми сюда. Там поддержка и телефон доверия. Срыв – не провал 💚" },
+    { sel: "#profileBtn", title: "Профиль", text: "Твоя норма, связь с тренером и кнопка «Отправить сводку». Здесь же можно пройти это обучение заново." },
+    { sel: null, tab: "home", title: "Готово!", text: "Начнём с малого: отметь сегодня завтрак или стакан воды. Я жду 🐣" },
+  ];
+  let tourI = 0;
+  function startTour() {
+    tourI = 0; closeSheet();
+    let el = $("#tour");
+    if (!el) {
+      el = document.createElement("div"); el.id = "tour";
+      el.innerHTML = '<div class="tour-hole"></div><div class="tour-dim"></div><div class="tour-box"><div class="tour-pet"></div><div class="tour-body"><b class="tour-title"></b><p class="tour-text"></p><div class="tour-dots"></div><div class="tour-btns"><button class="tour-skip">Пропустить</button><button class="btn tour-next">Дальше</button></div></div></div>';
+      document.body.appendChild(el);
+      $(".tour-skip", el).onclick = endTour;
+      $(".tour-next", el).onclick = () => { haptic(); tourI++; tourI < TOUR.length ? showTourStep() : endTour(); };
+      window.addEventListener("resize", () => { if ($("#tour.on")) placeTour(); });
+    }
+    el.classList.add("on");
+    showTourStep();
+  }
+  function showTourStep() {
+    const st = TOUR[tourI], el = $("#tour");
+    if (st.tab && st.tab !== tab) { tab = st.tab; render(); }
+    $(".tour-pet", el).innerHTML = petSVG(tourI === TOUR.length - 1 || tourI === 0 ? "happy" : "ok", 1, 64);
+    $(".tour-title", el).textContent = st.title;
+    $(".tour-text", el).textContent = st.text;
+    $(".tour-dots", el).innerHTML = TOUR.map((_, i) => `<i class="${i === tourI ? "on" : ""}"></i>`).join("");
+    $(".tour-next", el).textContent = tourI === TOUR.length - 1 ? "Поехали!" : "Дальше";
+    $(".tour-skip", el).style.visibility = tourI === TOUR.length - 1 ? "hidden" : "visible";
+    requestAnimationFrame(placeTour);
+  }
+  function placeTour() {
+    const st = TOUR[tourI], el = $("#tour"), hole = $(".tour-hole", el), box = $(".tour-box", el), dim = $(".tour-dim", el);
+    const t = st.sel && $(st.sel);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (!t) {
+      hole.style.display = "none"; dim.style.display = "block";
+      box.style.top = Math.max(16, vh / 2 - box.offsetHeight / 2) + "px"; box.className = "tour-box";
+      return;
+    }
+    const r = t.getBoundingClientRect(), pad = 6;
+    hole.style.display = "block"; dim.style.display = "none";
+    Object.assign(hole.style, { left: r.left - pad + "px", top: r.top - pad + "px", width: r.width + pad * 2 + "px", height: r.height + pad * 2 + "px" });
+    const below = r.top + r.height / 2 < vh / 2;
+    const top = below ? r.bottom + 18 : r.top - 18 - box.offsetHeight;
+    box.style.top = Math.max(12, Math.min(vh - box.offsetHeight - 12, top)) + "px";
+    box.className = "tour-box " + (below ? "up" : "down");
+    box.style.setProperty("--ax", Math.max(28, Math.min(vw - 28, r.left + r.width / 2)) - 12 + "px");
+  }
+  function endTour() {
+    const el = $("#tour"); if (el) el.classList.remove("on");
+    Store.set("tourDone", true);
+    if (tab !== "home") { tab = "home"; render(); }
+  }
+
   // ---------------------------------------------------------------- Маршрутизация
   function markTabs() { $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab)); }
   function render() {
@@ -696,6 +763,7 @@
     $("#tabs").style.display = "";
     markTabs();
     ({ home: renderHome, diary: renderDiary, plate: renderPlate, lessons: renderLessons, challenges: renderChallenges, profile: renderProfile, sos: renderSOS }[tab] || renderHome)();
+    if (!Store.get("tourDone") && !$("#tour.on")) setTimeout(startTour, 350);
   }
 
   // Надёжный фокус: в некоторых версиях Telegram первое касание поля не ставит курсор
@@ -715,5 +783,5 @@
   });
 
   // для автотестов
-  window.__pitlab = { calcNorm, Store, weekSummary, syncPayload };
+  window.__pitlab = { calcNorm, Store, weekSummary, syncPayload, startTour };
 })();
