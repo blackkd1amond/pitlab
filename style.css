@@ -89,7 +89,8 @@ main{padding:14px 14px 96px;max-width:560px;margin:0 auto}
 
 /* формы */
 label.f{display:block;margin:10px 0 4px;font-size:13px;font-weight:600;color:var(--dark)}
-.inp{width:100%;padding:11px 12px;border-radius:12px;border:1.5px solid var(--line);background:#fff;outline:none}
+.inp{width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:#fff;outline:none;
+  font-size:16px;-webkit-user-select:text;user-select:text;touch-action:manipulation;-webkit-appearance:none;appearance:none}
 .inp:focus{border-color:var(--acc)}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
 .seg button{flex:1;min-width:30%;padding:10px 6px;border-radius:12px;background:var(--sky);color:var(--dark);font-weight:600;font-size:13px}

@@ -8,6 +8,8 @@
     ? window.Telegram.WebApp : null;
   if (tg) {
     try { tg.ready(); tg.expand(); tg.setHeaderColor("#F5F9F5"); tg.setBackgroundColor("#F5F9F5"); } catch (e) {}
+    // Свайп вниз в Telegram сворачивает приложение и «перехватывает» нажатия на поля ввода – отключаем его
+    try { if (tg.isVersionAtLeast && tg.isVersionAtLeast("7.7") && tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch (e) {}
   }
   const P = window.PRODUCTS, L = window.LESSONS, KT = window.KNOWLEDGE_TEST, CH = window.CHALLENGES;
   const $ = (s, r = document) => r.querySelector(s);
@@ -268,7 +270,7 @@
         <p style="margin-top:6px;color:#DDEDE1">${edit ? "Норма пересчитается автоматически." : "Помогу разобраться с питанием под тренировки – безопасно и с поправкой на твой возраст. Ответь на несколько вопросов."}</p>
       </div>
       <div class="card">
-        <label class="f">Как тебя зовут?</label><input class="inp" id="o_name" value="${esc(p.name)}" maxlength="30" placeholder="Имя">
+        <label class="f">Как тебя зовут?</label><input class="inp" id="o_name" type="text" value="${esc(p.name)}" maxlength="30" placeholder="Имя" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" enterkeyhint="done">
         <label class="f">Пол</label><div class="seg" id="o_sex"><button data-v="f">Девушка</button><button data-v="m">Парень</button></div>
         <div class="grid2">
           <div><label class="f">Возраст</label><input class="inp" id="o_age" type="number" inputmode="numeric" min="10" max="19" value="${p.age}"></div>
@@ -695,6 +697,16 @@
     markTabs();
     ({ home: renderHome, diary: renderDiary, plate: renderPlate, lessons: renderLessons, challenges: renderChallenges, profile: renderProfile, sos: renderSOS }[tab] || renderHome)();
   }
+
+  // Надёжный фокус: в некоторых версиях Telegram первое касание поля не ставит курсор
+  document.addEventListener("touchend", e => {
+    const el = e.target.closest && e.target.closest("input.inp, textarea.inp");
+    if (el && document.activeElement !== el) setTimeout(() => { try { el.focus(); } catch (_) {} }, 0);
+  }, { passive: true });
+  // Enter в поле – просто прячет клавиатуру
+  document.addEventListener("keydown", e => {
+    if (e.key === "Enter" && e.target.matches && e.target.matches("input.inp")) { e.preventDefault(); e.target.blur(); }
+  });
 
   Store.init().then(() => {
     const start = new URLSearchParams(location.search).get("tab") || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param);
