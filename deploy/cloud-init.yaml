@@ -1,0 +1,76 @@
+#cloud-config
+# Настройка сервера ПитЛаб (Ubuntu, Cloud.ru) (вставляется в поле «Пользовательские данные» при создании ВМ).
+# ВАЖНО: в строке BOT_TOKEN= вставьте свой токен от @BotFather.
+package_update: true
+packages:
+  - python3-venv
+  - git
+
+write_files:
+  - path: /etc/pitlab.env
+    permissions: "0600"
+    content: |
+      BOT_TOKEN=ВСТАВЬТЕ_СЮДА_ТОКЕН
+      WEBAPP_URL=https://blackkd1amond.github.io/pitlab/
+      TG_PROXY=
+      ADMIN_IDS=
+      TZ_OFFSET_HOURS=3
+      REMIND_MORNING=08:00
+      REMIND_EVENING=20:00
+      DATA_DIR=/var/lib/pitlab
+
+  - path: /etc/systemd/system/pitlab-bot.service
+    content: |
+      [Unit]
+      Description=PitLab Telegram bot
+      After=network-online.target
+      Wants=network-online.target
+      [Service]
+      EnvironmentFile=/etc/pitlab.env
+      WorkingDirectory=/opt/pitlab/bot
+      ExecStart=/opt/pitlab-venv/bin/python bot.py
+      Restart=always
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+
+  # Автообновление: раз в 5 минут сервер берёт свежий код из GitHub и перезапускает бота, если что-то изменилось
+  - path: /usr/local/bin/pitlab-update
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      cd /opt/pitlab || exit 0
+      git fetch -q origin main || exit 0
+      if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+        git reset -q --hard origin/main
+        /opt/pitlab-venv/bin/pip install -q -r bot/requirements.txt
+        systemctl restart pitlab-bot
+      fi
+
+  - path: /etc/systemd/system/pitlab-update.service
+    content: |
+      [Unit]
+      Description=PitLab auto-update
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/pitlab-update
+
+  - path: /etc/systemd/system/pitlab-update.timer
+    content: |
+      [Unit]
+      Description=PitLab auto-update every 5 minutes
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=5min
+      [Install]
+      WantedBy=timers.target
+
+runcmd:
+  - git clone https://github.com/blackkd1amond/pitlab /opt/pitlab
+  - python3 -m venv /opt/pitlab-venv
+  - /opt/pitlab-venv/bin/pip install -q -r /opt/pitlab/bot/requirements.txt
+  - mkdir -p /var/lib/pitlab
+  - timedatectl set-timezone Europe/Moscow
+  - systemctl daemon-reload
+  - systemctl enable --now pitlab-bot
+  - systemctl enable --now pitlab-update.timer
