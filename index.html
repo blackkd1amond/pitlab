@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>ПитЛаб</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand" id="goHome">
+    <svg width="34" height="14" viewBox="0 0 88 24" aria-hidden="true"><g fill="#4F9465"><rect x="12" y="11" width="62" height="3"/><polygon points="88,12.5 68,3 72,12.5 68,22"/><polygon points="18,12.5 8,3 0,3 10,12.5"/><polygon points="18,12.5 8,22 0,22 10,12.5"/></g></svg>
+    <span>ПитЛаб</span>
+  </div>
+  <div class="top-actions">
+    <button class="sos" id="sosBtn" aria-label="Нет мотивации">Нет мотивации</button>
+    <button class="icon-btn" id="profileBtn" aria-label="Профиль">👤</button>
+  </div>
+</header>
+
+<main id="view"></main>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="home"><span>🏠</span>Главная</button>
+  <button data-tab="diary"><span>📒</span>Дневник</button>
+  <button data-tab="plate"><span>🍽️</span>Тарелка</button>
+  <button data-tab="lessons"><span>📚</span>Уроки</button>
+  <button data-tab="challenges"><span>🏆</span>Челленджи</button>
+</nav>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script src="products.js"></script>
+<script src="lessons.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
