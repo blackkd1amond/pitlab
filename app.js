@@ -4,6 +4,14 @@
 (function () {
   "use strict";
 
+  // Telegram может держать в кэше старый index.html без новых файлов – тогда догружаем их сами
+  if (!window.TASK_DAYS || !window.BADGES) {
+    const r = Date.now(), add = (src, cb) => { const x = document.createElement("script"); x.src = src + "?r=" + r; x.onload = cb; document.body.appendChild(x); };
+    if (!document.querySelector('link[href^="style.css?"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "style.css?r=" + r; document.head.appendChild(l); }
+    add("products.js", () => add("tasks.js", () => add("app.js", () => {})));
+    return;
+  }
+
   const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined
     ? window.Telegram.WebApp : null;
   if (tg) {
