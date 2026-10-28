@@ -30,6 +30,7 @@ from aiogram.types import (
 from pathlib import Path
 
 import db
+import vision
 from config import TG_PROXY, ADMIN_IDS, BOT_TOKEN, REMIND_EVENING, REMIND_MORNING, TZ_OFFSET_HOURS, WEBAPP_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -226,7 +227,8 @@ async def help_btn(m: Message, state: FSMContext):
         f"{BTN_GROUP} – создать группу с друзьями из зала или посмотреть таблицу очков.\n"
         f"{BTN_COACH} – подключить своего тренера (или зарегистрироваться тренером).\n"
         f"{BTN_REMIND} – включить или выключить напоминания.\n"
-        f"{BTN_SOS} – если опустились руки.\n\n"
+        f"{BTN_SOS} – если опустились руки.\n"
+        "📷 Пришли сюда фото тарелки – Стрелка посчитает КБЖУ.\n\n"
         "Получил от друга или тренера ссылку-приглашение? Просто открой её – всё подключится само.\n\n"
         f"<i>Для команды проекта: твой Telegram id – <code>{m.from_user.id}</code></i>",
         reply_markup=main_kb(m.from_user.id),
@@ -265,6 +267,8 @@ async def from_webapp(m: Message, bot: Bot, state: FSMContext):
         else:
             await m.answer("Сводка сохранена ✅", reply_markup=kb)
             await m.answer("Тренер пока не подключён. Подключить:", reply_markup=ikb([ib("🔑 Ввести код тренера", "coach:enter")]))
+    elif kind == "photo":
+        await m.answer(PHOTO_ASK, reply_markup=kb)
     elif kind == "sync":
         db.save_sync(m.from_user.id, data)
         u = db.get_user(m.from_user.id)
@@ -276,6 +280,77 @@ async def from_webapp(m: Message, bot: Bot, state: FSMContext):
             await m.answer("Чтобы соревноваться с друзьями, создай группу 👇", reply_markup=no_group_kb())
     else:
         await m.answer("Получил данные из приложения, но не понял, что с ними делать 🤔", reply_markup=kb)
+
+
+# ------------------------------------------------------------------ КБЖУ по фото
+import base64 as _b64
+import io as _io
+import time as _time
+
+PHOTO_ASK = (
+    "📷 <b>Пришли фото тарелки</b>\n\n"
+    "Сфотографируй еду сверху, чтобы было видно всю порцию, и отправь сюда. "
+    "Стрелка распознает блюда и посчитает калории, белки, жиры и углеводы."
+)
+PHOTO_LIMIT = 15  # фото на человека в сутки – чтобы не тратить лишнее на нейросеть
+_photo_uses: dict = {}
+MEAL_NAMES = {"b": "Завтрак", "l": "Обед", "d": "Ужин", "s": "Перекус"}
+
+
+def _photo_quota_ok(uid: int) -> bool:
+    day = int(_time.time() // 86400)
+    d, n = _photo_uses.get(uid, (day, 0))
+    if d != day:
+        n = 0
+    if n >= PHOTO_LIMIT:
+        return False
+    _photo_uses[uid] = (day, n + 1)
+    return True
+
+
+def _default_meal() -> str:
+    h = (datetime.now(timezone.utc) + timedelta(hours=TZ_OFFSET_HOURS)).hour
+    return "b" if h < 11 else "l" if h < 16 else "d" if h < 21 else "s"
+
+
+@router.message(F.photo)
+async def plate_photo(m: Message, bot: Bot, state: FSMContext):
+    await state.clear()
+    user(m)
+    kb = main_kb(m.from_user.id)
+    if not vision.enabled():
+        return await m.answer("📷 Подсчёт КБЖУ по фото скоро заработает – команда ПитЛаба уже подключает его. "
+                              "Пока можно найти продукты в дневнике вручную 🙌", reply_markup=kb)
+    if not _photo_quota_ok(m.from_user.id):
+        return await m.answer(f"На сегодня лимит фото исчерпан ({PHOTO_LIMIT}). Завтра можно снова 🙌", reply_markup=kb)
+    wait = await m.answer("🔍 Стрелка рассматривает тарелку…")
+    try:
+        await bot.send_chat_action(m.chat.id, "typing")
+        buf = _io.BytesIO()
+        await bot.download(m.photo[-1], destination=buf)
+        res = await vision.analyze(buf.getvalue())
+    except Exception as e:
+        logging.exception("Ошибка распознавания фото: %s", e)
+        return await wait.edit_text("Не получилось распознать фото 😕 Попробуй ещё раз чуть позже или добавь еду в дневнике вручную.")
+    if not res["food"]:
+        return await wait.edit_text("Хм, я не вижу на фото еды 🤔 Сфотографируй тарелку сверху, чтобы было видно всю порцию.")
+    items = res["items"]
+    tot = {k: sum(x[k] * x["grams"] / 100 for x in items) for k in ("kcal", "p", "f", "c")}
+    lines = [f"• {esc(x['name'])} – {x['grams']} г, {round(x['kcal'] * x['grams'] / 100)} ккал" for x in items]
+    meal = _default_meal()
+    text = (
+        "🍽️ <b>Что я вижу на тарелке:</b>\n" + "\n".join(lines) +
+        f"\n\n<b>Итого: {round(tot['kcal'])} ккал</b>\n"
+        f"Б {round(tot['p'])} г · Ж {round(tot['f'])} г · У {round(tot['c'])} г\n"
+        + (f"\n💚 {esc(res['tip'])}\n" if res["tip"] else "") +
+        f"\n<i>Оценка по фото примерная (±20%). Запишу в «{MEAL_NAMES[meal]}» – граммы можно поправить в дневнике.</i>"
+    )
+    payload = {"id": f"{m.chat.id}_{m.message_id}", "m": meal,
+               "e": [[x["name"], x["grams"], x["kcal"], x["p"], x["f"], x["c"], x["cat"]] for x in items]}
+    raw = _b64.urlsafe_b64encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()).decode().rstrip("=")
+    url = WEBAPP_URL + ("&" if "?" in WEBAPP_URL else "?") + "add=" + raw
+    await wait.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить в дневник", web_app=WebAppInfo(url=url))]]))
 
 
 def summary_text(d: dict, fallback_name: str) -> str:

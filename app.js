@@ -527,18 +527,60 @@
     $("#hMood").onclick = openMood;
   }
   function defaultMeal() { const h = new Date().getHours(); return h < 11 ? "b" : h < 16 ? "l" : h < 21 ? "d" : "s"; }
+  const norm = s => String(s).toLowerCase().replace(/ё/g, "е").replace(/[«»"(),.]/g, " ");
+  const FOOD_CATS = [["", "Все"], ["carb", "Гарниры"], ["prot", "Белок"], ["dairy", "Молочное"], ["veg", "Овощи и фрукты"], ["ready", "Готовые блюда"], ["snack", "Перекусы"], ["drink", "Напитки"]];
+  function openPhoto(meal) {
+    const canSend = !!(tg && tg.initData && tg.sendData);
+    openSheet(`<div class="photo-hero">📷🍽️</div><h2>Посчитать КБЖУ по фото</h2>
+      <ol class="steps"><li>Нажми кнопку ниже – откроется чат со Стрелкой</li><li>Сфотографируй тарелку сверху и отправь фото в чат</li>
+      <li>Стрелка распознает блюда и посчитает калории, белки, жиры и углеводы</li><li>Нажми «Добавить в дневник» – всё запишется само</li></ol>
+      <p class="muted small">Оценка по фото примерная (±20%). Можно поправить граммы после добавления.</p>
+      <button class="btn" id="phGo">📷 Отправить фото Стрелке</button>`, sh => {
+      $("#phGo", sh).onclick = () => {
+        Store.set("photoMeal", meal);
+        if (canSend) { try { tg.sendData(JSON.stringify({ t: "photo", m: meal })); return; } catch (e) {} }
+        if (tg && tg.close) { toast("Отправь фото тарелки в чат с ботом 📷"); setTimeout(() => tg.close(), 1200); }
+        else toast("Отправь фото тарелки в чат с ботом @PitLabb_bot 📷");
+      };
+    });
+  }
+  function importFromBot() {
+    const raw = new URLSearchParams(location.search).get("add");
+    if (!raw) return false;
+    let data; try { data = JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { return false; }
+    const doneKey = "imp_" + (data.id || raw.slice(0, 24));
+    if (Store.get(doneKey)) { tab = "diary"; return true; }
+    const meal = data.m || Store.get("photoMeal") || defaultMeal();
+    const num = x => Math.max(0, Math.round((+x || 0) * 10) / 10);
+    (data.e || []).slice(0, 12).forEach(x => {
+      const [n, g, k, p, f, c, cat] = x;
+      if (!n || !(+g > 0)) return;
+      addEntry({ i: -1, n: String(n).slice(0, 40), g: Math.round(+g), k: num(k), p: num(p), f: num(f), c: num(c), cat: ["veg", "prot", "carb", "dairy", "snack", "drink", "ready"].includes(cat) ? cat : "ready", ml: meal, ph: 1 }, true);
+    });
+    Store.set(doneKey, 1);
+    tab = "diary"; diaryDate = new Date();
+    setTimeout(() => toast("📷 Блюда с фото добавлены в дневник ✓"), 400);
+    return true;
+  }
   function openAdd(meal) {
     meal = meal || defaultMeal();
     openSheet(`<h2>Добавить еду</h2>
       <div class="seg" id="aMeal" style="margin:10px 0">${MEALS.map(m => `<button data-v="${m.id}" class="${m.id === meal ? "on" : ""}">${m.icon} ${m.label}</button>`).join("")}</div>
-      <input class="inp" id="aQ" placeholder="Поиск: гречка, творог, банан…" autocomplete="off">
+      <button class="photo-btn" id="aPhoto"><b>📷</b><span><strong>Посчитать по фото</strong><i>Сфоткай тарелку – Стрелка определит КБЖУ</i></span></button>
+      <input class="inp" id="aQ" placeholder="Поиск среди ${P.length} продуктов…" autocomplete="off">
+      <div class="chips" id="aCat">${FOOD_CATS.map((c, i) => `<button data-c="${c[0]}" class="${i ? "" : "on"}">${c[1]}</button>`).join("")}</div>
       <div class="list" id="aList" style="margin-top:6px"></div>
       <button class="btn ghost" id="aCustom" style="margin-top:8px">Нет в списке? Добавить свой продукт</button>`, sh => {
       $$("#aMeal button", sh).forEach(b => b.onclick = () => { meal = b.dataset.v; $$("#aMeal button", sh).forEach(x => x.classList.toggle("on", x === b)); });
-      const list = $("#aList", sh);
+      const list = $("#aList", sh); let cat = "";
+      $$("#aCat button", sh).forEach(b => b.onclick = () => { cat = b.dataset.c; $$("#aCat button", sh).forEach(x => x.classList.toggle("on", x === b)); draw(); });
+      $("#aPhoto", sh).onclick = () => openPhoto(meal);
       const draw = () => {
-        const q = $("#aQ", sh).value.trim().toLowerCase();
-        const res = P.map((x, i) => ({ x, i })).filter(o => !q || o.x.n.toLowerCase().includes(q)).slice(0, q ? 40 : 15);
+        const words = norm($("#aQ", sh).value).split(/\s+/).filter(Boolean).map(w => w.length > 4 ? w.slice(0, w.length > 6 ? 5 : 4) : w);
+        const res = P.map((x, i) => ({ x, i, t: norm(x.n) }))
+          .filter(o => (!cat || cat.split(",").includes(o.x.cat)) && words.every(w => o.t.includes(w)))
+          .sort((a, b) => words.length ? (a.t.startsWith(words[0]) ? 0 : 1) - (b.t.startsWith(words[0]) ? 0 : 1) : 0)
+          .slice(0, words.length || cat ? 60 : 20);
         list.innerHTML = res.map(o => `<button class="item" data-i="${o.i}" style="width:100%;text-align:left"><div><div class="t">${esc(o.x.n)}</div><div class="s">${o.x.k} ккал · Б ${o.x.p} Ж ${o.x.f} У ${o.x.c} на 100 г</div></div><span style="color:var(--acc);font-size:22px">+</span></button>`).join("") || `<div class="empty">Ничего не нашлось – добавь свой продукт</div>`;
         $$("button.item", list).forEach(b => b.onclick = () => openGrams(+b.dataset.i, meal));
       };
@@ -906,6 +948,7 @@
   Store.init().then(() => {
     const start = new URLSearchParams(location.search).get("tab") || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param);
     if (start && ["home", "diary", "plate", "lessons", "challenges", "profile", "sos"].includes(start)) tab = start;
+    if (importFromBot()) return render();
     if (start) return render();
     splash(() => render());
   });
