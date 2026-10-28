@@ -639,6 +639,7 @@
 
   // ---------------------------------------------------------------- Собери тарелку
   const plateState = { veg: null, prot: null, carb: null };
+  let plateAnim = null;
   function renderPlate() {
     const cats = {
       veg: { label: "Овощи и фрукты", share: "½ тарелки", color: "#8CCB8E", idx: P.map((x, i) => i).filter(i => P[i].cat === "veg") },
@@ -649,20 +650,30 @@
     const portion = c => c === "veg" ? 150 : (sel(c).portion || 120);
     let tk = 0, tp = 0;
     Object.keys(cats).forEach(c => { if (sel(c)) { const m = portion(c) / 100; tk += sel(c).k * m; tp += sel(c).p * m; } });
-    const fill = c => sel(c) ? cats[c].color : "#EEF4EF";
+    const fill = c => sel(c) ? { veg: "#DDF1DA", prot: "#FBE3D6", carb: "#FCF1CC" }[c] : "#EEF4EF";
+    const SPOTS = {
+      veg: [[60, 64, .95, -8], [86, 108, .7, 12], [48, 116, .85, 6], [68, 160, .95, -4]],
+      prot: [[138, 50, .8, 8], [174, 88, .78, -10], [140, 90, .85, 0]],
+      carb: [[138, 136, .85, 0], [174, 134, .78, 10], [146, 174, .8, -8]],
+    };
+    const foodArt = c => {
+      if (!sel(c) || !window.FOOD_ART) return "";
+      const art = window.FOOD_ART(sel(c).n, sel(c).cat), anim = plateAnim === c ? "fa pop" : "fa";
+      return SPOTS[c].map(([x, y, sc, r], i) => `<g transform="translate(${x} ${y}) rotate(${r}) scale(${sc})"><g class="${anim}" style="animation-delay:${i * 90}ms">${art}</g></g>`).join("");
+    };
     const ready = Object.keys(cats).every(c => sel(c));
     view.innerHTML = `
       <div class="card"><div class="eyebrow">Собери тарелку</div><h2>Сбалансированный приём пищи</h2>
         <p class="muted" style="margin-top:4px">Половина – овощи, четверть – белок, четверть – гарнир. Выбери продукт для каждой части.</p>
-        <div class="plate-wrap"><svg width="210" height="210" viewBox="0 0 220 220" aria-label="Тарелка">
+        <div class="plate-wrap"><svg width="240" height="240" viewBox="0 0 220 220" aria-label="Тарелка">
           <circle cx="110" cy="110" r="106" fill="#fff" stroke="#DCE8DF" stroke-width="4"/>
           <path d="M110 110 L110 18 A92 92 0 0 0 110 202 Z" fill="${fill("veg")}"/>
           <path d="M110 110 L110 18 A92 92 0 0 1 202 110 Z" fill="${fill("prot")}"/>
           <path d="M110 110 L202 110 A92 92 0 0 1 110 202 Z" fill="${fill("carb")}"/>
           <path d="M110 18 L110 202 M110 110 L202 110" stroke="#fff" stroke-width="4"/>
-          <text x="62" y="114" text-anchor="middle" font-size="13" font-weight="700" fill="#2F4A38">Овощи</text>
-          <text x="152" y="72" text-anchor="middle" font-size="13" font-weight="700" fill="#2F4A38">Белок</text>
-          <text x="152" y="156" text-anchor="middle" font-size="13" font-weight="700" fill="#2F4A38">Гарнир</text>
+          ${sel("veg") ? foodArt("veg") : `<text x="62" y="114" text-anchor="middle" font-size="13" font-weight="700" fill="#2F4A38">Овощи</text>`}
+          ${sel("prot") ? foodArt("prot") : `<text x="152" y="72" text-anchor="middle" font-size="13" font-weight="700" fill="#2F4A38">Белок</text>`}
+          ${sel("carb") ? foodArt("carb") : `<text x="152" y="156" text-anchor="middle" font-size="13" font-weight="700" fill="#2F4A38">Гарнир</text>`}
         </svg></div>
         ${Object.entries(cats).map(([c, o]) => `<div style="margin-top:6px"><div class="row between"><b>${o.label}</b><span class="muted">${o.share}${sel(c) ? " · " + esc(sel(c).n) : ""}</span></div>
           <div class="pick">${o.idx.slice(0, 18).map(i => `<button data-c="${c}" data-i="${i}" class="${plateState[c] === i ? "on" : ""}">${esc(P[i].n)}</button>`).join("")}</div></div>`).join("")}
@@ -673,7 +684,8 @@
         <h3>За 1–2 часа до</h3><p class="muted">Лёгкие углеводы: банан, йогурт, бутерброд, хлебцы. Не тренируйся голодным.</p>
         <h3>После</h3><p class="muted" style="margin:0">Белок + углеводы: творог с фруктами, кефир с бананом, курица с гарниром.</p>
       </div>`;
-    $$(".pick button").forEach(b => b.onclick = () => { plateState[b.dataset.c] = +b.dataset.i; haptic(); renderPlate(); });
+    plateAnim = null;
+    $$(".pick button").forEach(b => b.onclick = () => { const sy = window.scrollY; plateState[b.dataset.c] = +b.dataset.i; plateAnim = b.dataset.c; haptic(); renderPlate(); window.scrollTo(0, sy); });
     $("#plAdd").onclick = () => {
       if (!ready) return;
       openSheet(`<h2>В какой приём пищи?</h2><div class="seg" style="margin-top:10px">${MEALS.map(m => `<button data-v="${m.id}">${m.icon} ${m.label}</button>`).join("")}</div>`, sh => {
