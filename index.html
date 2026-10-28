@@ -5,28 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>ПитЛаб</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="top">
   <div class="brand" id="goHome">
     <svg width="34" height="14" viewBox="0 0 88 24" aria-hidden="true"><g fill="#4F9465"><rect x="12" y="11" width="62" height="3"/><polygon points="88,12.5 68,3 72,12.5 68,22"/><polygon points="18,12.5 8,3 0,3 10,12.5"/><polygon points="18,12.5 8,22 0,22 10,12.5"/></g></svg>
-    <span>ПитЛаб</span>
+    <span>Пит<em>Лаб</em></span>
   </div>
   <div class="top-actions">
     <button class="sos" id="sosBtn" aria-label="Нет мотивации">Нет мотивации</button>
-    <button class="icon-btn" id="profileBtn" aria-label="Профиль">👤</button>
+    <button class="icon-btn" id="profileBtn" aria-label="Профиль"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></button>
   </div>
 </header>
 
 <main id="view"></main>
 
 <nav class="tabs" id="tabs">
-  <button data-tab="home"><span>🏠</span>Главная</button>
-  <button data-tab="diary"><span>📒</span>Дневник</button>
-  <button data-tab="plate"><span>🍽️</span>Тарелка</button>
-  <button data-tab="lessons"><span>📚</span>Уроки</button>
-  <button data-tab="challenges"><span>🏆</span>Челленджи</button>
+  <button data-tab="home"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Главная</button>
+  <button data-tab="diary"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Дневник</button>
+  <button data-tab="plate"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M12 12h8"/></svg>Тарелка</button>
+  <button data-tab="lessons"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/><path d="M9 8h6"/></svg>Уроки</button>
+  <button data-tab="challenges"><svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M16 6h3a2 2 0 0 1-2 4h-1M8 6H5a2 2 0 0 0 2 4h1"/><path d="M12 13v4M8 21h8M10 17h4"/></svg>Челленджи</button>
 </nav>
 
 <div class="sheet-bg" id="sheetBg"></div>
@@ -35,6 +38,7 @@
 
 <script src="products.js"></script>
 <script src="lessons.js"></script>
+<script src="tasks.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

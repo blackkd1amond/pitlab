@@ -7,11 +7,12 @@
   const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined
     ? window.Telegram.WebApp : null;
   if (tg) {
-    try { tg.ready(); tg.expand(); tg.setHeaderColor("#F5F9F5"); tg.setBackgroundColor("#F5F9F5"); } catch (e) {}
+    try { tg.ready(); tg.expand(); tg.setHeaderColor("#F3F7F2"); tg.setBackgroundColor("#F3F7F2"); } catch (e) {}
     // Свайп вниз в Telegram сворачивает приложение и «перехватывает» нажатия на поля ввода – отключаем его
     try { if (tg.isVersionAtLeast && tg.isVersionAtLeast("7.7") && tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch (e) {}
   }
   const P = window.PRODUCTS, L = window.LESSONS, KT = window.KNOWLEDGE_TEST, CH = window.CHALLENGES;
+  const TD = window.TASK_DAYS, STAGES = window.PET_STAGES, TIPS = window.PET_TIPS, BADGES = window.BADGES;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -157,7 +158,7 @@
     const lim = dkey(addDays(new Date(), -14));
     Object.keys(s.aw).forEach(x => { if (x.slice(0, 8) < lim) delete s.aw[x]; });
     Store.set("xp", s);
-    toast(`+${amount} XP · ${label}`);
+    if (key === "lesson") { toast("Урок пройден ✓"); checkBadges(); }
   }
   function checkAwards() {
     const h = habits(dkey());
@@ -166,8 +167,81 @@
     if (h.veg) award("veg", 5, "овощи");
     if (h.training) award("training", 10, "тренировка");
     if (h.mood) award("mood", 5, "самочувствие");
+    syncTasks();
   }
-  const level = xp => Math.floor(xp / 100) + 1;
+  const level = () => petLevel();
+
+  // ---------------------------------------------------------------- Курс: 10 дней × 3 задания, 2 задания = 1 уровень
+  const TASKS = [
+    { id: "b", icon: "🍳", act: "Записать", go: "breakfast" },
+    { id: "w", icon: "💧", act: "+ стакан", go: "water" },
+    { id: "p", icon: "🥗", act: "Собрать", go: "plate" },
+  ];
+  const keyToDate = k => new Date(+k.slice(0, 4), +k.slice(4, 6) - 1, +k.slice(6, 8));
+  function course() {
+    let c = Store.get("course", null);
+    if (!c) { c = { start: dkey(), done: {}, seen: 0 }; Store.set("course", c); }
+    return c;
+  }
+  function courseDay() {
+    const ms = new Date(new Date().setHours(0, 0, 0, 0)) - keyToDate(course().start);
+    return Math.floor(ms / 864e5) + 1;
+  }
+  function hasPlate(d) {
+    return MEALS.some(m => {
+      const cats = new Set(d.e.filter(e => e.ml === m.id).map(e => entryNutr(e).cat));
+      return cats.has("veg") && (cats.has("prot") || cats.has("dairy")) && cats.has("carb");
+    });
+  }
+  function taskState(k) { const d = getDay(k); return { b: d.e.some(e => e.ml === "b"), w: d.w >= 6, p: hasPlate(d), water: d.w }; }
+  function syncTasks() {
+    const c = course(), k = dkey(), st = taskState(k), cur = c.done[k] || {};
+    let fresh = 0;
+    TASKS.forEach(t => { if (st[t.id] && !cur[t.id]) { cur[t.id] = 1; fresh++; } });
+    if (!fresh) return checkBadges();
+    const before = Math.min(10, Math.floor(tasksDone() / 2));
+    c.done[k] = cur; Store.set("course", c);
+    const after = petLevel();
+    haptic("medium");
+    if (after > before) setTimeout(() => celebrate(after), 250);
+    else toast(fresh > 1 ? `Заданий выполнено: ${fresh} ✓` : "Задание выполнено ✓ Стрелка растёт");
+    checkBadges();
+  }
+  const tasksDone = () => Object.values(course().done).reduce((a, x) => a + Object.keys(x).length, 0);
+  const petLevel = () => Math.min(10, Math.floor(tasksDone() / 2));
+  const stageOf = lvl => STAGES.filter(st => lvl >= st.from).pop();
+  function badgeState() {
+    const c = course(), days = Object.keys(c.done).sort(), cnt = t => days.filter(k => c.done[k][t]).length;
+    let run = 0, best = 0, prev = null;
+    days.forEach(k => { if (prev && dkey(addDays(keyToDate(prev), 1)) === k) run++; else run = 1; best = Math.max(best, run); prev = k; });
+    const lvl = petLevel();
+    return {
+      first: tasksDone() >= 1, hatch: lvl >= 1, perfect: days.some(k => Object.keys(c.done[k]).length >= 3), streak3: best >= 3,
+      water5: cnt("w") >= 5, breakfast5: cnt("b") >= 5, plate5: cnt("p") >= 5,
+      lessons3: Object.keys(lessonsState().done).length >= 3, lvl5: lvl >= 5, champ: lvl >= 10,
+    };
+  }
+  function checkBadges() {
+    const st = badgeState(), got = Store.get("badges", {});
+    const fresh = BADGES.filter(b => st[b.id] && !got[b.id]);
+    if (!fresh.length) return;
+    fresh.forEach(b => got[b.id] = dkey()); Store.set("badges", got);
+    $$(".bdg").forEach(el => el.classList.toggle("on", !!got[el.dataset.b]));
+    if ($("#bdgN")) $("#bdgN").textContent = `${Object.keys(got).length}/${BADGES.length}`;
+    setTimeout(() => toast(`${fresh[0].icon} Новый значок: ${fresh[0].title}`), $("#celebrate.on") ? 2600 : 1900);
+  }
+  function celebrate(lvl) {
+    const st = stageOf(lvl);
+    let el = $("#celebrate");
+    if (!el) { el = document.createElement("div"); el.id = "celebrate"; document.body.appendChild(el); el.onclick = () => el.classList.remove("on"); }
+    const colors = ["#F2C94C", "#4F9465", "#8FC09C", "#F4B9B2", "#FFFFFF"];
+    const conf = Array.from({ length: 36 }, (_, i) => `<i style="left:${(i * 37) % 100}%;background:${colors[i % 5]};animation-delay:${(i % 9) * 0.07}s;animation-duration:${1.6 + (i % 5) * 0.25}s"></i>`).join("");
+    el.innerHTML = `<div class="conf">${conf}</div><div class="cel-card">
+      <div class="cel-pet">${petSVG("happy", lvl, 170)}</div>
+      <div class="cel-lvl">Уровень ${lvl}</div><h2>${lvl === 10 ? "Стрелка – чемпион! 👑" : lvl === 1 ? "Стрелка вылупилась! 🐣" : "Стрелка подросла!"}</h2>
+      <p>${esc(st.text)}</p><button class="btn">Ура!</button></div>`;
+    el.classList.add("on"); haptic("heavy");
+  }
   function streak() {
     let n = 0, d = new Date();
     if (!habits(dkey(d)).active) d = addDays(d, -1);
@@ -190,24 +264,35 @@
     return { mood: "ok", text: "Стрелка ждёт завтрак и стакан воды 🙂" };
   }
   function petSVG(mood, lvl, size = 96) {
-    const s = 0.85 + Math.min(lvl, 10) * 0.03;
+    if (lvl <= 0) return `<svg class="pet-svg" width="${size}" height="${size}" viewBox="0 0 120 120" aria-label="Яйцо Стрелки">
+      <ellipse cx="60" cy="112" rx="30" ry="5" fill="rgba(35,65,46,.18)"/>
+      <path d="M60 14 C 86 14 100 52 100 74 C 100 96 82 110 60 110 C 38 110 20 96 20 74 C 20 52 34 14 60 14 Z" fill="#F7F2E1"/>
+      <path d="M60 14 C 86 14 100 52 100 74 C 100 96 82 110 60 110" fill="none" stroke="#E8DFC3" stroke-width="5"/>
+      <g fill="#8FC09C"><circle cx="42" cy="46" r="7"/><circle cx="78" cy="38" r="5"/><circle cx="84" cy="84" r="8"/><circle cx="36" cy="88" r="5"/></g>
+      <path d="M30 66 L42 58 L52 68 L62 58 L72 68 L82 58 L92 66" fill="none" stroke="#23412E" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+      <ellipse cx="50" cy="76" rx="4.5" ry="5.5" fill="#23412E"/><ellipse cx="70" cy="76" rx="4.5" ry="5.5" fill="#23412E"/>
+      <circle cx="51.5" cy="74" r="1.6" fill="#fff"/><circle cx="71.5" cy="74" r="1.6" fill="#fff"/></svg>`;
+    const s = 0.8 + Math.min(lvl, 10) * 0.022;
     const mouth = mood === "happy" ? "M44 66 Q60 82 76 66" : mood === "sad" ? "M46 74 Q60 64 74 74" : "M47 70 Q60 76 73 70";
     const eyes = mood === "sad"
       ? `<path d="M38 54 Q44 50 50 54" stroke="#23412E" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M70 54 Q76 50 82 54" stroke="#23412E" stroke-width="4" fill="none" stroke-linecap="round"/>`
       : `<ellipse cx="44" cy="54" rx="6" ry="7.5" fill="#23412E"/><ellipse cx="76" cy="54" rx="6" ry="7.5" fill="#23412E"/><circle cx="46" cy="51" r="2" fill="#fff"/><circle cx="78" cy="51" r="2" fill="#fff"/>`;
-    const band = lvl >= 3 ? `<path d="M22 38 Q60 26 98 38" stroke="#4F9465" stroke-width="6" fill="none" stroke-linecap="round"/>` : "";
-    const medal = lvl >= 6 ? `<circle cx="60" cy="104" r="9" fill="#F2C94C" stroke="#fff" stroke-width="2"/><text x="60" y="108" font-size="10" text-anchor="middle" fill="#fff" font-weight="700">★</text>` : "";
-    const sparkle = mood === "happy" ? `<g fill="#F2C94C"><circle cx="14" cy="30" r="3"/><circle cx="108" cy="24" r="2.5"/><circle cx="104" cy="86" r="3"/></g>` : "";
-    return `<svg width="${size}" height="${size}" viewBox="0 0 120 120" aria-label="Питомец Стрелка">
+    const band = lvl >= 4 ? `<path d="M19 40 Q60 28 101 40 L101 47 Q60 35 19 47 Z" fill="#E25B4B"/><path d="M99 42 l12 -6 l-3 9 l7 5 l-14 -1 z" fill="#E25B4B"/>` : "";
+    const medal = lvl >= 7 ? `<path d="M52 86 L60 98 L68 86" fill="none" stroke="#4F9465" stroke-width="4"/><circle cx="60" cy="102" r="8" fill="#F2C94C" stroke="#fff" stroke-width="2"/><text x="60" y="105.5" font-size="9" text-anchor="middle" fill="#fff" font-weight="800">★</text>` : "";
+    const crown = lvl >= 10 ? `<path d="M38 30 L44 12 L52 24 L60 6 L68 24 L76 12 L82 30 Z" fill="#F2C94C" stroke="#D9A926" stroke-width="2" stroke-linejoin="round"/><circle cx="60" cy="20" r="2.5" fill="#E25B4B"/>` : "";
+    const antenna = lvl >= 10 ? "" : `<g fill="#23412E"><rect x="59" y="6" width="2.5" height="22"/><polygon points="60,0 53,13 60,10 67,13"/></g>`;
+    const arms = `<path d="M18 76 C 6 80 4 92 10 95 C 16 98 21 89 22 83 Z" fill="#8FC09C"/><path d="M102 76 C 114 80 116 92 110 95 C 104 98 99 89 98 83 Z" fill="#8FC09C"/>`;
+    const sparkle = mood === "happy" || lvl >= 10 ? `<g class="spark" fill="#F2C94C"><circle cx="12" cy="30" r="3"/><circle cx="110" cy="22" r="2.5"/><circle cx="106" cy="86" r="3"/><circle cx="16" cy="96" r="2"/></g>` : "";
+    return `<svg class="pet-svg" width="${size}" height="${size}" viewBox="0 0 120 120" aria-label="Питомец Стрелка">
       <g transform="translate(60 64) scale(${s}) translate(-60 -64)">
-      <ellipse cx="60" cy="112" rx="34" ry="5" fill="rgba(35,65,46,.15)"/>
-      <g fill="#23412E"><rect x="59" y="6" width="2.5" height="22"/><polygon points="60,0 53,13 60,10 67,13"/></g>
+      <ellipse cx="60" cy="112" rx="34" ry="5" fill="rgba(35,65,46,.18)"/>
+      ${antenna}${arms}
       <path d="M60 26 C 96 26 106 56 104 74 C 102 96 84 108 60 108 C 36 108 18 96 16 74 C 14 56 24 26 60 26 Z" fill="#8FC09C"/>
       <path d="M60 34 C 90 34 98 60 96 74 C 94 92 80 100 60 100 C 40 100 26 92 24 74 C 22 60 30 34 60 34 Z" fill="#C4DDCA"/>
       ${band}${eyes}
       <ellipse cx="34" cy="66" rx="7" ry="4" fill="#F4B9B2"/><ellipse cx="86" cy="66" rx="7" ry="4" fill="#F4B9B2"/>
       <path d="${mouth}" stroke="#23412E" stroke-width="4.5" fill="none" stroke-linecap="round"/>
-      ${medal}</g>${sparkle}</svg>`;
+      ${medal}${crown}</g>${sparkle}</svg>`;
   }
 
   // ---------------------------------------------------------------- Челленджи
@@ -250,7 +335,7 @@
     const over = max > 0 && val > max * 1.1;
     return `<div class="ring"><svg width="120" height="120" viewBox="0 0 120 120">
       <circle cx="60" cy="60" r="${R}" fill="none" stroke="#DDEDE1" stroke-width="12"/>
-      <circle cx="60" cy="60" r="${R}" fill="none" stroke="${over ? "#D9822B" : "#4F9465"}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${C * pct} ${C}"/>
+      ${pct > 0 ? `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${over ? "#D9822B" : "#4F9465"}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${C * pct} ${C}"/>` : ""}
       </svg><div class="c"><b>${r0(val)}</b><span>из ${max} ${label}</span></div></div>`;
   }
   function macroRows(t, n) {
@@ -327,47 +412,70 @@
   // ---------------------------------------------------------------- Главная
   function renderHome() {
     const p = Store.get("profile"); const n = calcNorm(p);
+    syncTasks();
     const k = dkey(); const d = getDay(k); const t = totals(d); const h = habits(k);
-    const xs = xpState(); const lvl = level(xs.xp); const pm = petMood();
+    const lvl = petLevel(); const pm = petMood(); const st = stageOf(lvl);
+    const done = tasksDone(); const day = courseDay(); const dayN = Math.min(day, 10);
+    const today = course().done[k] || {}; const ts = taskState(k);
+    const plan = TD[(day - 1) % TD.length];
+    const doneToday = TASKS.filter(x => today[x.id]).length;
     const test = Store.get("test", {});
     const ls = lessonsState();
     const next = L.find(x => !ls.done[x.id]);
-    const last7 = Array.from({ length: 7 }, (_, i) => addDays(new Date(), i - 6));
+    const inLvl = lvl >= 10 ? 2 : done - lvl * 2;
+    const taskCard = x => {
+      const [title, hint] = plan[x.id]; const ok = !!today[x.id];
+      const extra = x.id === "w" && !ok ? `<div class="t-prog">${bar(ts.water, 6)}<span>${ts.water}/6</span></div>` : "";
+      return `<div class="task ${ok ? "done" : ""}" data-t="${x.id}">
+        <div class="t-ic">${x.icon}</div>
+        <div class="t-body"><b>${esc(title)}</b><span>${esc(hint)}</span>${extra}</div>
+        ${ok ? `<div class="t-check">✓</div>` : `<button class="t-btn" data-go="${x.go}">${x.act}</button>`}</div>`;
+    };
     view.innerHTML = `
-      <div class="card blue">
-        <div class="pet">${petSVG(pm.mood, lvl, 104)}
-          <div style="flex:1">
-            <div class="eyebrow" style="color:#E4F0E7">Привет, ${esc(p.name)}!</div>
-            <h3>Стрелка · уровень ${lvl}</h3>
-            <p style="font-size:13px;color:#DDEDE1;margin:4px 0 8px">${pm.text}</p>
-            ${bar(xs.xp % 100, 100)}<div class="xp" style="margin-top:4px">${xs.xp % 100}/100 XP до уровня ${lvl + 1} · 🔥 серия ${streak()} дн.</div>
-          </div>
-        </div>
+      <section class="hero">
+        <div class="hero-top"><span class="pill">${day > 10 ? "Курс пройден 🎉" : `День ${dayN} из 10 · ${esc(plan.theme)}`}</span><span class="pill">🔥 ${streak()}</span></div>
+        <div class="hero-pet" id="petTap"><div class="bubble" id="petSay"></div>${petSVG(pm.mood, lvl, 176)}</div>
+        <div class="hero-name">Стрелка · ${st.name}</div>
+        <div class="lvl"><span class="lvl-n">Уровень ${lvl}<small>/10</small></span><span class="lvl-s">${lvl >= 10 ? "максимум!" : `ещё ${2 - inLvl} ${2 - inLvl === 1 ? "задание" : "задания"} до ${lvl + 1}`}</span></div>
+        <div class="lvl-bar"><i style="width:${(inLvl / 2) * 100}%"></i></div>
+      </section>
+
+      <div class="sec-head"><h2>Задания на сегодня</h2><span class="badge ${doneToday === 3 ? "ok" : ""}">${doneToday}/3</span></div>
+      <div class="tasks">${TASKS.map(taskCard).join("")}</div>
+      ${doneToday === 3 ? `<div class="note good">Все задания на сегодня выполнены! Возвращайся завтра – Стрелка будет ждать 💚</div>` : ""}
+
+      <div class="tiles">
+        <button class="tile" id="openPath"><b>🗺️</b><span>Путь Стрелки</span><i>${done}/30</i></button>
+        <button class="tile" id="openBadges"><b>🏅</b><span>Значки</span><i id="bdgN">${Object.keys(Store.get("badges", {})).length}/${BADGES.length}</i></button>
       </div>
-      ${!test.before ? `<div class="card sky"><div class="row between"><div><h3>Тест «до» – 10 вопросов</h3><p class="muted" style="margin:2px 0 0">Узнаем, что ты уже знаешь о питании</p></div><button class="btn small" id="testBefore">Пройти</button></div></div>` : ""}
-      <div class="card">
-        <div class="row" style="gap:14px">${ring(t.k, n.kcal, "ккал")}
-          <div style="flex:1">${macroRows(t, n)}</div></div>
-        <button class="btn ghost" id="toDiary" style="margin-top:10px">+ Записать еду</button>
-      </div>
-      <div class="habits">
-        <button class="habit ${h.water ? "done" : ""}" id="hWater"><b>💧</b>Вода ${d.w}/6</button>
-        <button class="habit ${h.training ? "done" : ""}" id="hTrain"><b>🏋️</b>${h.training ? "Тренировка ✓" : "Тренировка"}</button>
-        <button class="habit ${h.mood ? "done" : ""}" id="hMood"><b>${["🙂", "😫", "😕", "🙂", "😊", "🤩"][h.mood]}</b>${h.mood ? "Энергия " + h.mood + "/5" : "Как ты?"}</button>
-      </div>
-      <div style="height:12px"></div>
-      ${next ? `<div class="card"><div class="eyebrow">Урок дня</div><div class="lesson-card"><div class="ic">${next.icon}</div><div style="flex:1"><h3>${esc(next.title)}</h3><p class="muted" style="margin:0">2–3 минуты + мини-тест</p></div><button class="btn small" id="lessonNext">Читать</button></div></div>` : ""}
-      <div class="card">
-        <div class="eyebrow">Моя неделя</div>
-        <div class="chart">${last7.map(dd => { const hh = habits(dkey(dd)); return `<div><i style="height:${hh.mood ? hh.mood * 14 : 3}px;background:${hh.mood ? "#6CA97E" : "#DDEDE1"}"></i>${hh.training ? "🏋️" : "·"}<span>${WD[dd.getDay()]}</span></div>`; }).join("")}</div>
-        <p class="muted small" style="margin-top:6px">Столбики – энергия по твоей оценке, 🏋️ – дни с тренировкой.</p>
-      </div>`;
+      ${!test.before ? `<button class="card promo slim" id="testBefore"><span>📝 Тест «до» – 10 вопросов</span><b>Пройти ›</b></button>` : ""}`;
+    $$(".t-btn").forEach(b => b.onclick = e => {
+      e.stopPropagation(); haptic();
+      const g = b.dataset.go;
+      if (g === "breakfast") { diaryDate = new Date(); go("diary"); setTimeout(() => openAdd("b"), 60); }
+      else if (g === "water") { const dd = getDay(k); dd.w = Math.min(12, dd.w + 1); setDay(k, dd); checkAwards(); renderHome(); }
+      else if (g === "plate") go("plate");
+    });
+    let tipI = Math.floor(Math.random() * TIPS.length);
+    $("#petTap").onclick = () => {
+      const el = $("#petTap"), say = $("#petSay");
+      el.classList.remove("hop"); void el.offsetWidth; el.classList.add("hop"); haptic();
+      say.textContent = lvl === 0 ? "Тук-тук! Выполни 2 задания – и я вылуплюсь 🥚" : TIPS[tipI++ % TIPS.length];
+      say.classList.remove("on"); void say.offsetWidth; say.classList.add("on");
+      clearTimeout(say._t); say._t = setTimeout(() => say.classList.remove("on"), 4200);
+    };
     if ($("#testBefore")) $("#testBefore").onclick = () => renderTest("before");
-    $("#toDiary").onclick = () => { diaryDate = new Date(); go("diary"); setTimeout(() => openAdd(), 50); };
-    $("#hWater").onclick = () => { const dd = getDay(k); dd.w = (dd.w + 1) % 13; setDay(k, dd); haptic(); checkAwards(); renderHome(); };
-    $("#hTrain").onclick = () => { const dd = getDay(k); dd.t = dd.t ? 0 : 1; setDay(k, dd); haptic(); checkAwards(); renderHome(); };
-    $("#hMood").onclick = openMood;
-    if ($("#lessonNext")) $("#lessonNext").onclick = () => renderLesson(next.id);
+    $("#openPath").onclick = () => openSheet(`<h2>Путь Стрелки</h2><p class="muted">${done} из 30 заданий · каждые 2 задания – новый уровень</p>
+      <div class="path">${Array.from({ length: 10 }, (_, i) => { const L1 = i + 1; const ic = { 1: "🐣", 4: "💪", 7: "🏅", 10: "👑" }[L1] || L1; return `<div class="node ${lvl >= L1 ? "on" : ""} ${lvl + 1 === L1 ? "next" : ""}"><span>${ic}</span></div>`; }).join("")}</div>
+      <div class="path-legend"><span>🐣 Малыш</span><span>💪 Спортсмен</span><span>🏅 Профи</span><span>👑 Чемпион</span></div>
+      <p class="muted small" style="margin-top:12px">${esc(st.text)}</p>`);
+    $("#openBadges").onclick = () => { const got = Store.get("badges", {});
+      openSheet(`<h2>Мои значки</h2><p class="muted">${Object.keys(got).length} из ${BADGES.length} · нажми на значок, чтобы узнать, как его получить</p>
+        <div class="badges">${BADGES.map(b => `<button class="bdg ${got[b.id] ? "on" : ""}" data-b="${b.id}"><span>${b.icon}</span><i>${esc(b.title)}</i></button>`).join("")}</div>
+        <p class="muted small" id="bdgHint" style="margin-top:12px;min-height:18px"></p>`, sh => {
+        $$(".bdg", sh).forEach(b => b.onclick = () => { const x = BADGES.find(y => y.id === b.dataset.b);
+          $("#bdgHint", sh).textContent = got[x.id] ? `${x.icon} ${x.title} – получен!` : `${x.icon} ${x.title}: ${x.hint}`; });
+      }); };
   }
   function openMood() {
     const k = dkey();
@@ -375,7 +483,7 @@
       <div class="seg" style="margin-top:10px">${[1, 2, 3, 4, 5].map(i => `<button data-v="${i}" style="font-size:22px">${["😫", "😕", "🙂", "😊", "🤩"][i - 1]}<br><span style="font-size:12px">${i}</span></button>`).join("")}</div>`, sh => {
       $$(".seg button", sh).forEach(b => b.onclick = () => {
         const d = getDay(k); d.m = +b.dataset.v; setDay(k, d); closeSheet(); checkAwards();
-        if (d.m <= 2) toast("Бывает. Загляни в «Нет мотивации» – там есть поддержка 💚"); renderHome();
+        if (d.m <= 2) toast("Бывает. Загляни в «Нет мотивации» – там есть поддержка 💚"); render();
       });
     });
   }
@@ -398,21 +506,25 @@
       ${MEALS.map(m => {
         const es = d.e.map((e, i) => ({ e, i })).filter(x => x.e.ml === m.id);
         const mk = es.reduce((a, x) => a + entryNutr(x.e).k, 0);
-        return `<div class="card meal"><h3><span>${m.icon} ${m.label}</span><span class="muted">${r0(mk)} ккал</span></h3>
-          <div class="list">${es.map(x => { const nn = entryNutr(x.e); return `<div class="item"><div><div class="t">${esc(nn.n)}</div><div class="s">${x.e.g} г · ${r0(nn.k)} ккал · Б ${r1(nn.p)} Ж ${r1(nn.f)} У ${r1(nn.c)}</div></div><button class="del" data-i="${x.i}" aria-label="Удалить">×</button></div>`; }).join("") || `<div class="muted" style="padding:6px 0">Пока пусто</div>`}</div>
-          <button class="btn small ghost add" data-m="${m.id}" style="margin-top:6px">+ Добавить</button></div>`;
+        return `<div class="card meal slim"><div class="meal-h"><span>${m.icon} ${m.label}</span><span class="muted small">${mk ? r0(mk) + " ккал" : ""}</span><button class="add plus" data-m="${m.id}" aria-label="Добавить">+</button></div>
+          ${es.length ? `<div class="list">${es.map(x => { const nn = entryNutr(x.e); return `<div class="item"><div><div class="t">${esc(nn.n)}</div><div class="s">${x.e.g} г · ${r0(nn.k)} ккал</div></div><button class="del" data-i="${x.i}" aria-label="Удалить">×</button></div>`; }).join("")}</div>` : ""}</div>`;
       }).join("")}
-      <div class="card"><div class="row between"><div><h3>💧 Вода</h3><p class="muted" style="margin:0">${d.w} из 6 стаканов</p></div>
+      <div class="card"><div class="row between"><b>💧 Вода · ${d.w}/6</b>
         <div class="row"><button class="btn small ghost" id="wMinus">−</button><button class="btn small" id="wPlus">+ стакан</button></div></div></div>
-      <div class="card"><label class="row between"><span><b>🚫 Без сладкой газировки</b><br><span class="muted">Отметь, если сегодня обошёлся без неё</span></span>
-        <input type="checkbox" id="noSoda" ${d.ns ? "checked" : ""} style="width:24px;height:24px"></label></div>`;
+      <div class="habits three">
+        <label class="habit ${d.ns ? "done" : ""}"><input type="checkbox" id="noSoda" ${d.ns ? "checked" : ""} hidden><b>🚫</b>${d.ns ? "Без газировки ✓" : "Без газировки?"}</label>
+        <button class="habit ${d.t ? "done" : ""}" id="hTrain"><b>🏋️</b>${d.t ? "Тренировка ✓" : "Тренировка?"}</button>
+        <button class="habit ${d.m ? "done" : ""}" id="hMood"><b>${["🙂", "😫", "😕", "🙂", "😊", "🤩"][d.m || 0]}</b>${d.m ? "Энергия " + d.m + "/5" : "Как ты?"}</button>
+      </div>`;
     $("#prevD").onclick = () => { diaryDate = addDays(diaryDate, -1); renderDiary(); };
     $("#nextD").onclick = () => { if (!isToday) { diaryDate = addDays(diaryDate, 1); renderDiary(); } };
     $$(".add").forEach(b => b.onclick = () => openAdd(b.dataset.m));
     $$(".del").forEach(b => b.onclick = () => { const dd = getDay(k); dd.e.splice(+b.dataset.i, 1); setDay(k, dd); renderDiary(); });
     $("#wPlus").onclick = () => { const dd = getDay(k); dd.w = Math.min(12, dd.w + 1); setDay(k, dd); haptic(); if (isToday) checkAwards(); renderDiary(); };
     $("#wMinus").onclick = () => { const dd = getDay(k); dd.w = Math.max(0, dd.w - 1); setDay(k, dd); renderDiary(); };
-    $("#noSoda").onchange = e => { const dd = getDay(k); dd.ns = e.target.checked ? 1 : 0; setDay(k, dd); if (isToday && dd.ns) toast("Отлично! Засчитано в челлендж"); };
+    $("#noSoda").onchange = e => { const dd = getDay(k); dd.ns = e.target.checked ? 1 : 0; setDay(k, dd); if (isToday && dd.ns) toast("Отлично! Засчитано в челлендж"); renderDiary(); };
+    $("#hTrain").onclick = () => { const dd = getDay(k); dd.t = dd.t ? 0 : 1; setDay(k, dd); haptic(); if (isToday) checkAwards(); renderDiary(); };
+    $("#hMood").onclick = openMood;
   }
   function defaultMeal() { const h = new Date().getHours(); return h < 11 ? "b" : h < 16 ? "l" : h < 21 ? "d" : "s"; }
   function openAdd(meal) {
@@ -518,7 +630,7 @@
         $$(".seg button", sh).forEach(b => b.onclick = () => {
           diaryDate = new Date();
           Object.keys(cats).forEach(c => addEntry({ i: plateState[c], g: portion(c), ml: b.dataset.v }, true));
-          closeSheet(); toast("Тарелка записана в дневник ✓"); haptic("medium");
+          closeSheet(); haptic("medium"); toast("Тарелка записана в дневник ✓"); checkAwards();
         });
       });
     };
@@ -616,12 +728,12 @@
       if (d.e.length) { kcSum += totals(d).k; kcDays++; }
       if (d.m) { en += d.m; enN++; }
     });
-    return { t: "summary", n: p.name, act, br, wa, ve, tr, le, kc: kcDays ? r0((kcSum / kcDays / n.kcal) * 100) : 0, en: enN ? r1(en / enN) : 0, pts: weekPoints(), lvl: level(xpState().xp) };
+    return { t: "summary", n: p.name, act, br, wa, ve, tr, le, kc: kcDays ? r0((kcSum / kcDays / n.kcal) * 100) : 0, en: enN ? r1(en / enN) : 0, pts: weekPoints(), lvl: petLevel(), tasks: tasksDone() };
   }
   function syncPayload() {
     const test = Store.get("test", {});
     let act10 = 0; for (let i = 0; i < 10; i++) if (habits(dkey(addDays(new Date(), -i))).active) act10++;
-    return { t: "sync", pts: weekPoints(), xp: xpState().xp, lvl: level(xpState().xp), a10: act10, tb: test.before ? test.before.s : null, ta: test.after ? test.after.s : null, r: Store.get("rating", null), ls: Object.keys(lessonsState().done).length };
+    return { t: "sync", pts: weekPoints(), xp: xpState().xp, lvl: petLevel(), tasks: tasksDone(), day: courseDay(), a10: act10, tb: test.before ? test.before.s : null, ta: test.after ? test.after.s : null, r: Store.get("rating", null), ls: Object.keys(lessonsState().done).length };
   }
   function summaryText(s) {
     return `ПитЛаб · неделя ${s.n}\nАктивных дней: ${s.act}/7\nЗавтрак: ${s.br}/7 · Вода: ${s.wa}/7 · Овощи: ${s.ve}/7\nТренировок: ${s.tr} · Уроков: ${s.le}\nКалории в среднем: ${s.kc}% нормы\nЭнергия: ${s.en || "–"}/5 · Очки челленджей: ${s.pts}`;
@@ -652,10 +764,10 @@
       <div class="card"><div class="eyebrow">Моя норма</div>
         <div class="row between"><h2>${n.kcal} ккал</h2><span class="muted">Б ${n.p} · Ж ${n.f} · У ${n.c} г</span></div>
         ${n.note ? `<div class="note">${esc(n.note)}</div>` : ""}
-        <p class="muted small" style="margin-top:6px">Формула Шофилда для 10–18 лет × уровень активности. Цель «сбросить» снижает норму максимум на 10%, и она никогда не опускается ниже безопасного минимума. Нормы БЖУ – по рекомендациям для подростков-спортсменов. Это ориентир, не медицинская рекомендация.</p></div>
+        <details class="more"><summary>Как считается норма</summary><p class="muted small">Формула Шофилда для 10–18 лет × уровень активности. Цель «сбросить» снижает норму максимум на 10%, и она никогда не опускается ниже безопасного минимума. Нормы БЖУ – по рекомендациям для подростков-спортсменов. Это ориентир, не медицинская рекомендация.</p></details></div>
       <div class="card"><div class="eyebrow">👟 Тренер на связи</div>
-        <p class="muted">Тренер увидит только недельную сводку привычек – без веса и без того, что именно ты ел. Чтобы подключить тренера, открой его ссылку-приглашение или нажми в чате с ботом <b>👟 Тренер</b> → «Ввести код тренера».</p>
-        <div class="card sky" style="white-space:pre-line;font-size:13px">${esc(summaryText(s))}</div>
+        <p class="muted">Тренер увидит только сводку привычек – без веса и без того, что ты ел.</p>
+        <details class="more"><summary>Что увидит тренер</summary><div class="card sky" style="white-space:pre-line;font-size:13px">${esc(summaryText(s))}</div><p class="muted small">Подключить тренера: его ссылка-приглашение или в боте <b>👟 Тренер</b> → «Ввести код тренера».</p></details>
         <button class="btn" id="sendCoach">Отправить сводку тренеру</button></div>
       <div class="card"><div class="eyebrow">Оцени ПитЛаб</div><p class="muted">Насколько ПитЛаб тебе полезен?</p>
         <div class="seg" id="rate">${[1, 2, 3, 4, 5].map(i => `<button data-v="${i}" class="${rating === i ? "on" : ""}">${i}</button>`).join("")}</div></div>
@@ -696,15 +808,15 @@
 
   // ---------------------------------------------------------------- Обучение: Стрелка показывает кнопки
   const TOUR = [
-    { sel: null, title: "Привет, я Стрелка!", text: "Я твой питомец. Расту, когда ты завтракаешь, пьёшь воду и проходишь уроки. Давай покажу, что тут где – это 30 секунд." },
-    { sel: '#tabs [data-tab="home"]', tab: "home", title: "Главная", text: "Здесь я живу. Видно твою норму на сегодня, воду, тренировку и урок дня. Отмечай привычки – я буду расти." },
+    { sel: null, title: "Привет, я Стрелка!", text: "Я твой тамагочи. Пока я в яйце! Каждый день у тебя 3 задания: завтрак, вода и сбалансированная тарелка. Каждые 2 задания – мой новый уровень. Покажу, что тут где – 30 секунд." },
+    { sel: '#tabs [data-tab="home"]', tab: "home", title: "Главная", text: "Здесь я живу. Тут задания на сегодня, мой уровень и путь до короны 👑 Выполняй задания – я буду расти." },
     { sel: '#tabs [data-tab="diary"]', tab: "diary", title: "Дневник", text: "Записывай, что ты ел. Я сам посчитаю калории, белки, жиры и углеводы. Можно добавить свой продукт." },
     { sel: '#tabs [data-tab="plate"]', tab: "plate", title: "Собери тарелку", text: "Половина – овощи, четверть – белок, четверть – гарнир. Собери обед и добавь его в дневник одной кнопкой." },
-    { sel: '#tabs [data-tab="lessons"]', tab: "lessons", title: "Уроки", text: "Короткие уроки по 2 минуты с мини-тестами. За каждый урок – +20 XP мне на рост 💪" },
+    { sel: '#tabs [data-tab="lessons"]', tab: "lessons", title: "Уроки", text: "Короткие уроки по 2 минуты с мини-тестами. Объясняю простым языком, без скучных цифр 💪" },
     { sel: '#tabs [data-tab="challenges"]', tab: "challenges", title: "Челленджи", text: "Задания на неделю и соревнование с друзьями. Очки – только за привычки, никаких рейтингов по весу." },
     { sel: "#sosBtn", title: "Нет мотивации", text: "Если опустились руки или сорвался – жми сюда. Там поддержка и телефон доверия. Срыв – не провал 💚" },
     { sel: "#profileBtn", title: "Профиль", text: "Твоя норма, связь с тренером и кнопка «Отправить сводку». Здесь же можно пройти это обучение заново." },
-    { sel: null, tab: "home", title: "Готово!", text: "Начнём с малого: отметь сегодня завтрак или стакан воды. Я жду 🐣" },
+    { sel: null, tab: "home", title: "Готово!", text: "Начнём с первого задания – запиши завтрак или выпей стакан воды. Я жду, чтобы вылупиться 🐣" },
   ];
   let tourI = 0;
   function startTour() {
@@ -776,12 +888,28 @@
     if (e.key === "Enter" && e.target.matches && e.target.matches("input.inp")) { e.preventDefault(); e.target.blur(); }
   });
 
+  // ---------------------------------------------------------------- Заставка
+  function splash(onStart) {
+    const isNew = !Store.get("profile");
+    const lvl = isNew ? 0 : petLevel();
+    const el = document.createElement("div"); el.id = "splash";
+    el.innerHTML = `<div class="sp-rings"><i></i><i></i><i></i></div>
+      <div class="sp-logo"><svg width="46" height="18" viewBox="0 0 88 24"><g fill="#F6D97A"><rect x="12" y="11" width="62" height="3"/><polygon points="88,12.5 68,3 72,12.5 68,22"/><polygon points="18,12.5 8,3 0,3 10,12.5"/><polygon points="18,12.5 8,22 0,22 10,12.5"/></g></svg><span>Пит<em>Лаб</em></span></div>
+      <div class="sp-pet">${petSVG("happy", lvl, 210)}</div>
+      <h1 class="sp-title">${isNew ? "Вырасти свою Стрелку" : "Стрелка соскучилась!"}</h1>
+      <p class="sp-text">${isNew ? "3 задания в день – и за 10 дней она вырастет из яйца до чемпиона" : `Уровень ${lvl} из 10`}</p>
+      <button class="btn sp-btn">${isNew ? "Начать" : "Продолжить"}</button>
+`;
+    document.body.appendChild(el);
+    $(".sp-btn", el).onclick = () => { haptic("medium"); el.classList.add("out"); setTimeout(() => el.remove(), 450); onStart(); };
+  }
   Store.init().then(() => {
     const start = new URLSearchParams(location.search).get("tab") || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param);
     if (start && ["home", "diary", "plate", "lessons", "challenges", "profile", "sos"].includes(start)) tab = start;
-    render();
+    if (start) return render();
+    splash(() => render());
   });
 
   // для автотестов
-  window.__pitlab = { calcNorm, Store, weekSummary, syncPayload, startTour };
+  window.__pitlab = { calcNorm, Store, weekSummary, syncPayload, startTour, celebrate, petLevel, tasksDone, badgeState };
 })();
