@@ -140,6 +140,8 @@ async def start(m: Message, command: CommandObject, state: FSMContext, bot: Bot)
     await state.clear()
     user(m)
     arg = (command.args or "").strip().upper()
+    if arg == "GYM":
+        return await gym_checkin(m)
     if arg.startswith("T"):
         return await link_coach(m, arg, bot)
     if arg.startswith("G"):
@@ -228,7 +230,8 @@ async def help_btn(m: Message, state: FSMContext):
         f"{BTN_COACH} – подключить своего тренера (или зарегистрироваться тренером).\n"
         f"{BTN_REMIND} – включить или выключить напоминания.\n"
         f"{BTN_SOS} – если опустились руки.\n"
-        "📷 Пришли сюда фото тарелки – Стрелка посчитает КБЖУ.\n\n"
+        "📷 Пришли сюда фото тарелки – Стрелка посчитает КБЖУ.\n"
+        "🏋️ В зале отсканируй QR-код на ресепшене – Стрелка получит гантелю.\n\n"
         "Получил от друга или тренера ссылку-приглашение? Просто открой её – всё подключится само.\n\n"
         f"<i>Для команды проекта: твой Telegram id – <code>{m.from_user.id}</code></i>",
         reply_markup=main_kb(m.from_user.id),
@@ -359,7 +362,8 @@ def summary_text(d: dict, fallback_name: str) -> str:
         f"<b>ПитЛаб · неделя · {name}</b>\n"
         f"Активных дней: {d.get('act', 0)}/7\n"
         f"🍳 Завтрак: {d.get('br', 0)}/7 · 💧 Вода: {d.get('wa', 0)}/7 · 🥦 Овощи: {d.get('ve', 0)}/7\n"
-        f"🏋️ Тренировок: {d.get('tr', 0)} · 📚 Уроков: {d.get('le', 0)}\n"
+        f"🏋️ Тренировок: {d.get('tr', 0)} · в зале по QR: {d.get('g', 0)} · 📚 Уроков: {d.get('le', 0)}\n"
+        + (f"🎯 Задание тренера: {d.get('ct')}/5 дней\n" if d.get("ct") is not None else "") +
         f"🔥 Калории в среднем: {d.get('kc', 0)}% нормы\n"
         f"⚡ Энергия: {d.get('en') or '–'}/5 · 🏆 Очки: {d.get('pts', 0)} · уровень Стрелки {d.get('lvl', 1)}"
     )
@@ -478,8 +482,9 @@ def trainer_text(uid: int) -> str:
             ts, d = db.last_summary(s["id"])
             if d:
                 when = datetime.fromtimestamp(ts, TZ).strftime("%d.%m")
+                ct = f", задание {d.get('ct')}/5" if d.get("ct") is not None else ""
                 lines.append(f"• <b>{esc(s['name'])}</b> ({when}): активных дней {d.get('act', 0)}/7, "
-                             f"тренировок {d.get('tr', 0)}, энергия {d.get('en') or '–'}/5")
+                             f"тренировок {d.get('tr', 0)}, в зале по QR {d.get('g', 0)}{ct}, энергия {d.get('en') or '–'}/5")
             else:
                 lines.append(f"• <b>{esc(s['name'])}</b>: сводки пока нет")
     return "\n".join(lines)
@@ -488,6 +493,7 @@ def trainer_text(uid: int) -> str:
 def trainer_kb(code: str) -> InlineKeyboardMarkup:
     return ikb(
         [ib("📨 Отправить ссылку подопечным", url=share_url(invite_link(code), "Подключайся ко мне в ПитЛабе – лаборатории питания 🍏"))],
+        [ib("🎯 Дать задание недели", "tt:menu")],
         [ib("🔄 Обновить список", "tr:list")],
     )
 
@@ -506,11 +512,104 @@ async def trainer_list(c: CallbackQuery):
     await c.answer("Обновлено")
 
 
+# ------------------------------------------------------------------ Отметка в зале по QR-коду
+# QR-код на ресепшене ведёт на https://t.me/<бот>?start=gym (картинка – qr_gym.png)
+def today_key() -> str:
+    return datetime.now(TZ).strftime("%Y%m%d")
+
+
+def webapp_url(params: str) -> str:
+    return WEBAPP_URL + ("&" if "?" in WEBAPP_URL else "?") + params
+
+
+async def gym_checkin(m: Message):
+    day = today_key()
+    new, total = db.add_checkin(m.from_user.id, day)
+    kb = main_kb(m.from_user.id)
+    if new:
+        text = (f"🏋️ <b>Ты в зале – отмечено!</b>\n\nСтрелка тренируется вместе с тобой и получила гантелю 💪\n"
+                f"Отметок в зале: <b>{total}</b>. Тренировка сразу засчитается в привычках.")
+    else:
+        text = f"Сегодня ты уже отметился в зале ✅ Всего отметок: <b>{total}</b>."
+    await m.answer(text, reply_markup=kb)
+    await m.answer("Нажми, чтобы Стрелка получила награду:",
+                   reply_markup=ikb([InlineKeyboardButton(text="💪 Открыть Стрелку", web_app=WebAppInfo(url=webapp_url(f"checkin={day}")))]))
+
+
+# ------------------------------------------------------------------ Задание недели от тренера
+# Тот же список – в мини-приложении (tasks.js → COACH_TASKS), порядок важен
+COACH_TASKS = [
+    "Белок после каждой тренировки",
+    "Овощи в обед и ужин",
+    "Завтрак до 9 утра",
+    "Неделя без сладкой газировки",
+    "Перекус за час до тренировки",
+]
+
+
+@router.callback_query(F.data == "tt:menu")
+async def coach_task_menu(c: CallbackQuery):
+    u = db.get_user(c.from_user.id)
+    if not u or u["role"] != "trainer":
+        return await c.answer("Это для тренеров", show_alert=True)
+    rows = [[ib(f"🎯 {t}", f"tt:{i}")] for i, t in enumerate(COACH_TASKS)]
+    rows.append([ib("◀️ Назад", "tr:list")])
+    await c.message.answer(
+        "🎯 <b>Задание недели для подопечных</b>\n\nВыберите задание – оно придёт всем подключённым подросткам. "
+        "Кто выполнит его 5 дней, получит для Стрелки фирменную повязку LadyFit, а вы увидите прогресс в сводке.",
+        reply_markup=ikb(*rows))
+    await c.answer()
+
+
+@router.callback_query(F.data.regexp(r"^tt:\d+$"))
+async def coach_task_send(c: CallbackQuery, bot: Bot):
+    u = db.get_user(c.from_user.id)
+    if not u or u["role"] != "trainer":
+        return await c.answer("Это для тренеров", show_alert=True)
+    i = int(c.data.split(":")[1])
+    if i >= len(COACH_TASKS):
+        return await c.answer()
+    stamp = datetime.now(TZ).strftime("%y%m%d%H%M")
+    url = webapp_url(f"ct={i}&cw={stamp}")
+    sent = 0
+    for s in db.students_of(c.from_user.id):
+        try:
+            await bot.send_message(
+                s["id"],
+                f"🎯 <b>Тренер {esc(c.from_user.first_name)} дал задание недели:</b>\n«{COACH_TASKS[i]}»\n\n"
+                "Отмечай его в ПитЛабе 5 дней – и Стрелка получит фирменную повязку LadyFit 🎀",
+                reply_markup=ikb([InlineKeyboardButton(text="🎯 Принять задание", web_app=WebAppInfo(url=url))]))
+            sent += 1
+        except Exception as e:
+            logging.info("Задание не доставлено %s: %s", s["id"], e)
+        await asyncio.sleep(0.05)
+    await c.message.edit_text(f"✅ Задание «{COACH_TASKS[i]}» отправлено подопечным: {sent}."
+                              + ("" if sent else "\nПока никто не подключён – отправьте им ссылку-приглашение."),
+                              reply_markup=ikb([ib("👥 Мои подопечные", "tr:list")]))
+    await c.answer("Отправлено")
+
+
 # ------------------------------------------------------------------ Группы-челленджи
+PET_STAGES = [(10, "👑", "Чемпион"), (7, "🏅", "Профи"), (4, "💪", "Спортсмен"), (1, "🐣", "Малыш"), (0, "🥚", "Яйцо")]
+
+
+def group_pet(rows) -> str:
+    """Общая Стрелка группы: растёт от заданий всех участников (в среднем 2 задания на человека = 1 уровень)."""
+    if not rows:
+        return ""
+    avg = sum(r["tasks"] for r in rows) / len(rows)
+    lvl = min(10, int(avg // 2))
+    icon, name = next((i, n) for f, i, n in PET_STAGES if lvl >= f)
+    left = 0 if lvl >= 10 else max(1, round((lvl + 1) * 2 * len(rows) - sum(r["tasks"] for r in rows)))
+    bar = "🟩" * lvl + "⬜" * (10 - lvl)
+    tail = "максимум! 🎉" if lvl >= 10 else f"до следующего уровня группе нужно ещё {left} " + ("задание" if left % 10 == 1 and left % 100 != 11 else "задания" if 2 <= left % 10 <= 4 and not 12 <= left % 100 <= 14 else "заданий")
+    return f"{icon} <b>Общая Стрелка группы</b> – уровень {lvl}/10 · {name}\n{bar}\n<i>{tail}</i>\n"
+
+
 def table_text(code: str, me: int) -> str:
     rows = db.group_table(code)
     medals = ["🥇", "🥈", "🥉"]
-    lines = ["🏆 <b>Твоя группа</b> · очки за привычки этой недели\n"]
+    lines = [group_pet(rows), "🏆 <b>Твоя группа</b> · очки за привычки этой недели\n"]
     for i, r in enumerate(rows):
         mark = medals[i] if i < 3 else f"{i + 1}."
         me_mark = " ← ты" if r["id"] == me else ""
@@ -524,6 +623,7 @@ def group_kb(code: str) -> InlineKeyboardMarkup:
     return ikb(
         [ib("📨 Пригласить друзей", url=share_url(invite_link(code), "Го соревноваться в полезных привычках в ПитЛабе 💪"))],
         [ib("📤 Отправить мои очки", tab="challenges"), ib("🔄 Обновить", "grp:refresh")],
+        [ib("👉 Напомнить группе", "grp:nudge")],
         [ib("🚪 Выйти из группы", "grp:leave")],
     )
 
@@ -598,6 +698,37 @@ async def group_refresh(c: CallbackQuery):
     await c.answer("Обновлено")
 
 
+_nudged: dict = {}
+
+
+@router.callback_query(F.data == "grp:nudge")
+async def group_nudge(c: CallbackQuery, bot: Bot):
+    u = db.get_user(c.from_user.id)
+    if not u or not u["group_code"]:
+        return await c.answer("Ты сейчас не в группе", show_alert=True)
+    day = today_key()
+    if _nudged.get(c.from_user.id) == day:
+        return await c.answer("Сегодня ты уже напоминал группе 🙂", show_alert=True)
+    _nudged[c.from_user.id] = day
+    sent = 0
+    for r in db.group_table(u["group_code"]):
+        if r["id"] == c.from_user.id:
+            continue
+        if r["ts"] and datetime.fromtimestamp(r["ts"], TZ).strftime("%Y%m%d") == day:
+            continue  # уже прислал очки сегодня
+        try:
+            await bot.send_message(
+                r["id"],
+                f"👉 <b>{esc(c.from_user.first_name)}</b> напоминает: общая Стрелка группы растёт только вместе! "
+                "Выполни сегодня задания и отправь очки 💪",
+                reply_markup=ikb([ib("🍏 Открыть ПитЛаб", tab="")]))
+            sent += 1
+        except Exception:
+            pass
+        await asyncio.sleep(0.05)
+    await c.answer(f"Напоминание отправлено: {sent}" if sent else "Все уже отправили очки сегодня 🎉", show_alert=True)
+
+
 @router.callback_query(F.data == "grp:leave")
 async def group_leave_ask(c: CallbackQuery):
     await c.message.edit_reply_markup(reply_markup=ikb([ib("Да, выйти", "grp:leave_yes"), ib("Остаться", "grp:refresh")]))
@@ -645,6 +776,7 @@ async def sos(m: Message, state: FSMContext):
 # ------------------------------------------------------------------ Статистика пилота (кнопка только для команды)
 def stats_text() -> str:
     s = db.pilot_stats()
+    g = db.checkin_stats(today_key())
     pct = lambda a, b: f"{round(a / b * 100)}%" if b else "–"
     return (
         "📊 <b>Пилот ПитЛаба</b>\n\n"
@@ -655,6 +787,7 @@ def stats_text() -> str:
         f"цель – ≥70%, средняя {s['rating_avg'] or '–'}\n"
         f"<b>Тест знаний</b>: средний «до» {s['test_before_avg'] or '–'}/10, пар «до–после» {s['pairs']}, "
         f"рост {s['growth_pct'] if s['growth_pct'] is not None else '–'}% · цель – +30%\n\n"
+        f"<b>Отметки в зале по QR</b>: всего {g['total']}, человек {g['people']}, сегодня {g['today']}\n\n"
         "Данные приходят, когда подросток нажимает в приложении «Отправить мои очки в группу»."
     )
 

@@ -318,3 +318,33 @@ details.more[open] summary::after{content:" ⌄"}
 .fa{transform-box:fill-box;transform-origin:center}
 .fa.pop{animation:faPop .55s cubic-bezier(.3,1.6,.5,1) both}
 @keyframes faPop{0%{transform:scale(0) rotate(-25deg);opacity:0}100%{transform:scale(1) rotate(0);opacity:1}}
+
+/* быстрые действия: зал и отдых */
+.quick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 0}
+.qa{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;padding:12px 14px;border-radius:20px;background:#fff;box-shadow:0 4px 14px rgba(31,58,41,.06);text-align:left;color:var(--navy)}
+.qa b{grid-row:span 2;font-size:24px;line-height:1}
+.qa span{font-weight:800;font-size:14px}
+.qa i{font-style:normal;font-size:11.5px;color:var(--muted)}
+.qa.on{background:linear-gradient(160deg,#F1F8F2,#E2F0E5)}
+/* задание тренера */
+.coach-card{margin-top:12px;border:2px solid #F4C6DD;background:linear-gradient(160deg,#fff,#FFF4FA)}
+.coach-card h3{margin-top:6px}
+.cdots{display:flex;gap:6px;margin-bottom:10px}
+.cdots i{flex:1;height:8px;border-radius:4px;background:#F3E3EC}
+.cdots i.on{background:#E0559A}
+/* Стрелка спит */
+.zzz text{animation:zz 2.4s ease-in-out infinite}
+.zzz text:nth-child(2){animation-delay:.4s}.zzz text:nth-child(3){animation-delay:.8s}
+@keyframes zz{0%,100%{opacity:.2;transform:translateY(2px)}50%{opacity:1;transform:translateY(-2px)}}
+/* Стрелка ест */
+#feed{position:fixed;inset:0;z-index:90;display:none;align-items:flex-end;justify-content:center;background:rgba(20,40,28,.45);backdrop-filter:blur(3px)}
+#feed.on{display:flex;animation:fadeIn .25s both}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.feed-card{width:100%;max-width:460px;max-height:92vh;overflow:auto;background:#fff;border-radius:28px 28px 0 0;padding:16px 20px calc(20px + env(safe-area-inset-bottom));text-align:center;animation:sheetUp .35s cubic-bezier(.2,.9,.3,1) both}
+@keyframes sheetUp{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+.feed-pet{display:inline-block;margin-bottom:-26px;position:relative;z-index:2}
+.feed-pet.chomp .pet-svg{animation:chomp .5s ease-in-out 3}
+@keyframes chomp{0%,100%{transform:scale(1)}30%{transform:scale(1.08,.92)}60%{transform:scale(.95,1.06)}}
+.feed-plate{display:block;margin:0 auto;filter:drop-shadow(0 10px 18px rgba(31,58,41,.15))}
+.feed-kbju{text-align:left;margin-top:10px}
+.feed-card .row .btn{flex:1}

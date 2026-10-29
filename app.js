@@ -179,6 +179,107 @@
   }
   const level = () => petLevel();
 
+  // ---------------------------------------------------------------- Зал, день отдыха, задание тренера
+  const REST_MAX = 3;
+  const gymDays = () => Store.get("gym", {});
+  const gymToday = () => !!gymDays()[dkey()];
+  const restDays = () => Store.get("rest", {});
+  const isRest = k => !!restDays()[k];
+  const restLeft = () => REST_MAX - Object.keys(restDays()).length;
+  function gymCheckin(fromBot) {
+    const k = dkey(), g = gymDays();
+    if (g[k]) { if (!fromBot) toast("Сегодня ты уже отметился в зале 💪"); return false; }
+    g[k] = 1; Store.set("gym", g);
+    const d = getDay(k); d.t = 1; setDay(k, d); // тренировка засчитывается и в привычках
+    haptic("heavy"); checkAwards();
+    showPetMoment("💪", "Ты в зале!", "Стрелка тренируется вместе с тобой и получила гантелю. Отметок в зале: " + Object.keys(g).length, "happy");
+    return true;
+  }
+  function scanGym() {
+    const ok = txt => /start=gym|PITLAB-GYM/i.test(String(txt || ""));
+    if (tg && tg.showScanQrPopup && (!tg.isVersionAtLeast || tg.isVersionAtLeast("6.4"))) {
+      try {
+        tg.showScanQrPopup({ text: "Наведи камеру на QR-код ПитЛаба на ресепшене" }, txt => {
+          if (ok(txt)) { setTimeout(() => { gymCheckin(); render(); }, 150); return true; }
+          toast("Это не QR-код ПитЛаба 🤔"); return false;
+        });
+        return;
+      } catch (e) {}
+    }
+    openSheet(`<div class="photo-hero">🏋️📷</div><h2>Отметься в зале</h2>
+      <p class="muted">На ресепшене фитнес-центра висит QR-код ПитЛаба. Отсканируй его камерой телефона – откроется бот, и Стрелка получит гантелю.</p>
+      <p class="muted small">Засчитывается одна отметка в день. Тренировка сразу появится в твоих привычках.</p>`);
+  }
+  function toggleRest() {
+    const r = restDays(), k = dkey();
+    if (r[k]) {
+      openSheet(`<h2>Отменить день отдыха?</h2><p class="muted">Дни отдыха вернутся: останется ${restLeft() + 1} из ${REST_MAX}.</p><button class="btn" id="rsNo">Да, я передумал</button>`, sh => {
+        $("#rsNo", sh).onclick = () => { delete r[k]; Store.set("rest", r); closeSheet(); render(); };
+      });
+      return;
+    }
+    if (restLeft() <= 0) return toast("Дни отдыха на этот курс закончились – но пропуск всё равно не страшен 💚");
+    openSheet(`<div class="photo-hero">😴</div><h2>Взять день отдыха?</h2>
+      <p class="muted">Отдых – тоже часть тренировок. Стрелка поспит, грустить не будет, а серия дней не сгорит.</p>
+      <p class="muted small">Осталось дней отдыха: ${restLeft()} из ${REST_MAX}. Задания сегодня выполнять можно, но не обязательно.</p>
+      <button class="btn" id="rsYes">Взять день отдыха</button>`, sh => {
+      $("#rsYes", sh).onclick = () => { r[k] = 1; Store.set("rest", r); closeSheet(); haptic("medium"); render();
+        showPetMoment("😴", "День отдыха", "Стрелка уютно спит. Возвращайся завтра – она будет ждать!", "sleep"); };
+    });
+  }
+  const COACH = window.COACH_TASKS || [];
+  const coachTask = () => { const c = Store.get("coachTask", null); return c && COACH[c.id] ? c : null; };
+  const coachDone = () => { const c = coachTask(); return c ? Object.keys(c.done || {}).length : 0; };
+  const hasLF = () => !!Store.get("lf", false);
+  function markCoach() {
+    const c = coachTask(); if (!c) return;
+    c.done = c.done || {}; if (c.done[dkey()]) return toast("Сегодня уже отмечено ✓");
+    c.done[dkey()] = 1; Store.set("coachTask", c); haptic("medium");
+    if (Object.keys(c.done).length >= 5 && !hasLF()) {
+      Store.set("lf", true); checkBadges();
+      showPetMoment("🎯", "Задание тренера выполнено!", "Стрелка получила фирменную повязку LadyFit. Тренер увидит это в твоей сводке.", "happy");
+    } else toast(`Задание тренера: ${Object.keys(c.done).length} из 5 дней ✓`);
+    render();
+  }
+  function showPetMoment(icon, title, text, mood) {
+    let el = $("#celebrate");
+    if (!el) { el = document.createElement("div"); el.id = "celebrate"; document.body.appendChild(el); el.onclick = () => el.classList.remove("on"); }
+    el.innerHTML = `<div class="cel-card"><div class="cel-pet">${petSVG(mood, Math.max(1, petLevel()), 170)}</div>
+      <div class="cel-lvl">${icon}</div><h2>${esc(title)}</h2><p>${esc(text)}</p><button class="btn">Отлично!</button></div>`;
+    el.classList.add("on");
+  }
+
+  // ---------------------------------------------------------------- Стрелка ест: еда с фото или тарелки
+  function feedPet(items, title) {
+    const cats = new Set(items.map(x => x.cat));
+    const prot = cats.has("prot") || cats.has("dairy"), veg = cats.has("veg"), carb = cats.has("carb") || cats.has("ready");
+    const onlySweet = items.length && items.every(x => x.cat === "snack" || x.cat === "drink");
+    const v = veg && prot && carb ? { mood: "happy", t: "Сбалансированно! Стрелка в восторге 💚", s: "Есть овощи, белок и гарнир – именно так и надо." }
+      : onlySweet ? { mood: "ok", t: "Вкусно, но этого мало", s: "Стрелке нужна настоящая еда: добавь белок и овощи к следующему приёму пищи." }
+      : !veg ? { mood: "ok", t: "Не хватает овощей 🥦", s: "Добавь овощи или фрукты – и тарелка станет сбалансированной." }
+      : !prot ? { mood: "ok", t: "Не хватает белка 🍗", s: "Курица, рыба, яйца, творог или фасоль помогут мышцам после зала." }
+      : { mood: "happy", t: "Хорошая тарелка!", s: "Для полного баланса добавь гарнир: крупу, картошку или хлеб." };
+    const LAY = { 1: [[100, 104]], 2: [[64, 104], [136, 104]], 3: [[100, 62], [142, 132], [58, 132]], 4: [[64, 72], [136, 72], [64, 138], [136, 138]],
+      5: [[100, 58], [146, 94], [128, 148], [72, 148], [54, 94]], 6: [[100, 56], [146, 86], [146, 128], [100, 156], [54, 128], [54, 86]] };
+    const list = items.slice(0, 6), spots = LAY[list.length] || [], sc = list.length <= 2 ? 1.25 : list.length <= 4 ? 1 : .82;
+    const foods = list.map((x, i) => `<g transform="translate(${spots[i][0]} ${spots[i][1]}) scale(${sc})"><g class="fa pop" style="animation-delay:${200 + i * 160}ms">${window.FOOD_ART ? window.FOOD_ART(x.n, x.cat) : ""}</g></g>`).join("");
+    const tot = items.reduce((a, x) => ({ k: a.k + x.k, p: a.p + x.p, f: a.f + x.f, c: a.c + x.c }), { k: 0, p: 0, f: 0, c: 0 });
+    let el = $("#feed");
+    if (!el) { el = document.createElement("div"); el.id = "feed"; document.body.appendChild(el); }
+    el.innerHTML = `<div class="feed-card">
+      <div class="feed-pet">${petSVG(v.mood, Math.max(1, petLevel()), 120)}</div>
+      <svg class="feed-plate" width="200" height="200" viewBox="0 0 200 200"><circle cx="100" cy="104" r="92" fill="#fff" stroke="#DCE8DF" stroke-width="5"/><circle cx="100" cy="104" r="74" fill="none" stroke="#EEF4EF" stroke-width="3"/>${foods}</svg>
+      <div class="eyebrow" style="margin-top:6px">${esc(title || "Стрелка обедает")}</div>
+      <h2>${v.t}</h2><p class="muted">${v.s}</p>
+      <div class="feed-kbju" hidden><div class="list">${items.map(x => `<div class="item"><div><div class="t">${esc(x.n)}</div><div class="s">${Math.round(x.g)} г · ${r0(x.k)} ккал · Б ${r1(x.p)} Ж ${r1(x.f)} У ${r1(x.c)}</div></div></div>`).join("")}</div>
+        <p style="margin:8px 0 0"><b>Итого: ${r0(tot.k)} ккал</b> · Б ${r0(tot.p)} · Ж ${r0(tot.f)} · У ${r0(tot.c)} г</p></div>
+      <div class="row" style="gap:8px;margin-top:12px"><button class="btn ghost" id="fdK">Показать КБЖУ</button><button class="btn" id="fdOk">Готово</button></div></div>`;
+    el.classList.add("on"); haptic("medium");
+    setTimeout(() => { const pe = $(".feed-pet", el); if (pe) pe.classList.add("chomp"); }, 300 + items.length * 160);
+    $("#fdK", el).onclick = () => { const k = $(".feed-kbju", el); k.hidden = !k.hidden; $("#fdK", el).textContent = k.hidden ? "Показать КБЖУ" : "Скрыть КБЖУ"; };
+    $("#fdOk", el).onclick = () => el.classList.remove("on");
+  }
+
   // ---------------------------------------------------------------- Курс: 10 дней × 3 задания, 2 задания = 1 уровень
   const TASKS = [
     { id: "b", icon: "🍳", act: "Записать", go: "breakfast" },
@@ -227,6 +328,7 @@
       first: tasksDone() >= 1, hatch: lvl >= 1, perfect: days.some(k => Object.keys(c.done[k]).length >= 3), streak3: best >= 3,
       water5: cnt("w") >= 5, breakfast5: cnt("b") >= 5, plate5: cnt("p") >= 5,
       lessons3: Object.keys(lessonsState().done).length >= 3, lvl5: lvl >= 5, champ: lvl >= 10,
+      gym1: Object.keys(gymDays()).length >= 1, gym5: Object.keys(gymDays()).length >= 5, coach: hasLF(),
     };
   }
   function checkBadges() {
@@ -252,15 +354,17 @@
   }
   function streak() {
     let n = 0, d = new Date();
-    if (!habits(dkey(d)).active) d = addDays(d, -1);
-    while (habits(dkey(d)).active && n < 365) { n++; d = addDays(d, -1); }
+    const act = k => habits(k).active || isRest(k);
+    if (!act(dkey(d))) d = addDays(d, -1);
+    while (act(dkey(d)) && n < 365) { n++; d = addDays(d, -1); }
     return n;
   }
   function lastActiveDaysAgo() {
-    for (let i = 0; i < 30; i++) if (habits(dkey(addDays(new Date(), -i))).active) return i;
+    for (let i = 0; i < 30; i++) { const k = dkey(addDays(new Date(), -i)); if (habits(k).active || isRest(k)) return i; }
     return 30;
   }
   function petMood() {
+    if (isRest(dkey())) return { mood: "sleep", text: "Сегодня день отдыха – Стрелка спит 😴" };
     const h = habits(dkey());
     const score = [h.breakfast, h.water, h.veg, h.lesson, h.training, h.mood > 0].filter(Boolean).length;
     if (score >= 3) return { mood: "happy", text: "Стрелка счастлива! Так держать 💚" };
@@ -281,15 +385,21 @@
       <ellipse cx="50" cy="76" rx="4.5" ry="5.5" fill="#23412E"/><ellipse cx="70" cy="76" rx="4.5" ry="5.5" fill="#23412E"/>
       <circle cx="51.5" cy="74" r="1.6" fill="#fff"/><circle cx="71.5" cy="74" r="1.6" fill="#fff"/></svg>`;
     const s = 0.8 + Math.min(lvl, 10) * 0.022;
-    const mouth = mood === "happy" ? "M44 66 Q60 82 76 66" : mood === "sad" ? "M46 74 Q60 64 74 74" : "M47 70 Q60 76 73 70";
-    const eyes = mood === "sad"
+    const mouth = mood === "happy" ? "M44 66 Q60 82 76 66" : mood === "sad" ? "M46 74 Q60 64 74 74" : mood === "sleep" ? "M55 72 Q60 76 65 72" : "M47 70 Q60 76 73 70";
+    const eyes = mood === "sleep"
+      ? `<path d="M37 55 Q44 60 51 55" stroke="#23412E" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M69 55 Q76 60 83 55" stroke="#23412E" stroke-width="4" fill="none" stroke-linecap="round"/>`
+      : mood === "sad"
       ? `<path d="M38 54 Q44 50 50 54" stroke="#23412E" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M70 54 Q76 50 82 54" stroke="#23412E" stroke-width="4" fill="none" stroke-linecap="round"/>`
       : `<ellipse cx="44" cy="54" rx="6" ry="7.5" fill="#23412E"/><ellipse cx="76" cy="54" rx="6" ry="7.5" fill="#23412E"/><circle cx="46" cy="51" r="2" fill="#fff"/><circle cx="78" cy="51" r="2" fill="#fff"/>`;
-    const band = lvl >= 4 ? `<path d="M19 40 Q60 28 101 40 L101 47 Q60 35 19 47 Z" fill="#E25B4B"/><path d="M99 42 l12 -6 l-3 9 l7 5 l-14 -1 z" fill="#E25B4B"/>` : "";
+    const lf = hasLF(), gym = gymToday() && mood !== "sleep";
+    const band = lf ? `<path d="M19 40 Q60 28 101 40 L101 48 Q60 36 19 48 Z" fill="#E0559A"/><path d="M99 42 l12 -6 l-3 9 l7 5 l-14 -1 z" fill="#E0559A"/><text x="60" y="41.5" font-size="8" font-weight="800" text-anchor="middle" fill="#fff" letter-spacing="1">LADYFIT</text>`
+      : lvl >= 4 ? `<path d="M19 40 Q60 28 101 40 L101 47 Q60 35 19 47 Z" fill="#E25B4B"/><path d="M99 42 l12 -6 l-3 9 l7 5 l-14 -1 z" fill="#E25B4B"/>` : "";
     const medal = lvl >= 7 ? `<path d="M52 86 L60 98 L68 86" fill="none" stroke="#4F9465" stroke-width="4"/><circle cx="60" cy="102" r="8" fill="#F2C94C" stroke="#fff" stroke-width="2"/><text x="60" y="105.5" font-size="9" text-anchor="middle" fill="#fff" font-weight="800">★</text>` : "";
     const crown = lvl >= 10 ? `<path d="M38 30 L44 12 L52 24 L60 6 L68 24 L76 12 L82 30 Z" fill="#F2C94C" stroke="#D9A926" stroke-width="2" stroke-linejoin="round"/><circle cx="60" cy="20" r="2.5" fill="#E25B4B"/>` : "";
     const antenna = lvl >= 10 ? "" : `<g fill="#23412E"><rect x="59" y="6" width="2.5" height="22"/><polygon points="60,0 53,13 60,10 67,13"/></g>`;
     const arms = `<path d="M18 76 C 6 80 4 92 10 95 C 16 98 21 89 22 83 Z" fill="#8FC09C"/><path d="M102 76 C 114 80 116 92 110 95 C 104 98 99 89 98 83 Z" fill="#8FC09C"/>`;
+    const dumb = gym ? `<g transform="rotate(-28 108 90)"><rect x="98" y="88" width="22" height="4" rx="2" fill="#6B7780"/><rect x="94" y="81" width="7" height="18" rx="2.5" fill="#33413A"/><rect x="117" y="81" width="7" height="18" rx="2.5" fill="#33413A"/></g>` : "";
+    const zzz = mood === "sleep" ? `<g class="zzz" fill="#4F9465" font-weight="800"><text x="92" y="30" font-size="14">z</text><text x="102" y="18" font-size="11">z</text><text x="110" y="9" font-size="8">z</text></g>` : "";
     const sparkle = mood === "happy" || lvl >= 10 ? `<g class="spark" fill="#F2C94C"><circle cx="12" cy="30" r="3"/><circle cx="110" cy="22" r="2.5"/><circle cx="106" cy="86" r="3"/><circle cx="16" cy="96" r="2"/></g>` : "";
     return `<svg class="pet-svg" width="${size}" height="${size}" viewBox="0 0 120 120" aria-label="Питомец Стрелка">
       <g transform="translate(60 64) scale(${s}) translate(-60 -64)">
@@ -300,7 +410,7 @@
       ${band}${eyes}
       <ellipse cx="34" cy="66" rx="7" ry="4" fill="#F4B9B2"/><ellipse cx="86" cy="66" rx="7" ry="4" fill="#F4B9B2"/>
       <path d="${mouth}" stroke="#23412E" stroke-width="4.5" fill="none" stroke-linecap="round"/>
-      ${medal}${crown}</g>${sparkle}</svg>`;
+      ${medal}${crown}${dumb}</g>${sparkle}${zzz}</svg>`;
   }
 
   // ---------------------------------------------------------------- Челленджи
@@ -450,7 +560,17 @@
 
       <div class="sec-head"><h2>Задания на сегодня</h2><span class="badge ${doneToday === 3 ? "ok" : ""}">${doneToday}/3</span></div>
       <div class="tasks">${TASKS.map(taskCard).join("")}</div>
-      ${doneToday === 3 ? `<div class="note good">Все задания на сегодня выполнены! Возвращайся завтра – Стрелка будет ждать 💚</div>` : ""}
+      ${doneToday === 3 ? `<div class="note good">Все задания на сегодня выполнены! Возвращайся завтра – Стрелка будет ждать 💚</div>` : isRest(k) ? `<div class="note">😴 Сегодня день отдыха. Задания можно выполнять, но не обязательно – серия не сгорит.</div>` : ""}
+
+      <div class="quick">
+        <button class="qa ${gymToday() ? "on" : ""}" id="qGym"><b>${gymToday() ? "✅" : "🏋️"}</b><span>${gymToday() ? "В зале сегодня" : "Я в зале"}</span><i>${gymToday() ? "Стрелка с гантелей" : "отсканируй QR"}</i></button>
+        <button class="qa ${isRest(k) ? "on" : ""}" id="qRest"><b>😴</b><span>${isRest(k) ? "Отдыхаем" : "День отдыха"}</span><i>${isRest(k) ? "нажми, чтобы отменить" : `осталось ${restLeft()} из ${REST_MAX}`}</i></button>
+      </div>
+      ${(() => { const c = coachTask(); if (!c) return ""; const n = Math.min(5, coachDone()), today = !!(c.done || {})[k], x = COACH[c.id];
+        return `<div class="card coach-card"><div class="row between"><div class="eyebrow">🎯 Задание от тренера</div><span class="muted small">${n} из 5 дней</span></div>
+          <h3>${esc(x.title)}</h3><p class="muted small" style="margin:2px 0 8px">${esc(x.hint)}</p>
+          <div class="cdots">${Array.from({ length: 5 }, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("")}</div>
+          ${n >= 5 ? `<div class="note good" style="margin:8px 0 0">Выполнено! У Стрелки фирменная повязка LadyFit 🎀</div>` : `<button class="btn ${today ? "ghost" : ""}" id="coachMark" ${today ? "disabled" : ""}>${today ? "Сегодня выполнено ✓" : "Выполнил сегодня"}</button>`}</div>`; })()}
 
       <div class="tiles">
         <button class="tile" id="openPath"><b>🗺️</b><span>Путь Стрелки</span><i>${done}/30</i></button>
@@ -468,11 +588,14 @@
     $("#petTap").onclick = () => {
       const el = $("#petTap"), say = $("#petSay");
       el.classList.remove("hop"); void el.offsetWidth; el.classList.add("hop"); haptic();
-      say.textContent = lvl === 0 ? "Тук-тук! Выполни 2 задания – и я вылуплюсь 🥚" : TIPS[tipI++ % TIPS.length];
+      say.textContent = isRest(k) ? "Хр-р… Я сплю. Завтра продолжим 😴" : lvl === 0 ? "Тук-тук! Выполни 2 задания – и я вылуплюсь 🥚" : TIPS[tipI++ % TIPS.length];
       say.classList.remove("on"); void say.offsetWidth; say.classList.add("on");
       clearTimeout(say._t); say._t = setTimeout(() => say.classList.remove("on"), 4200);
     };
     if ($("#testBefore")) $("#testBefore").onclick = () => renderTest("before");
+    $("#qGym").onclick = () => { haptic(); gymToday() ? toast("Сегодня ты уже в зале 💪 Отметок: " + Object.keys(gymDays()).length) : scanGym(); };
+    $("#qRest").onclick = () => { haptic(); toggleRest(); };
+    if ($("#coachMark")) $("#coachMark").onclick = markCoach;
     $("#openPath").onclick = () => openSheet(`<h2>Путь Стрелки</h2><p class="muted">${done} из 30 заданий · каждые 2 задания – новый уровень</p>
       <div class="path">${Array.from({ length: 10 }, (_, i) => { const L1 = i + 1; const ic = { 1: "🐣", 4: "💪", 7: "🏅", 10: "👑" }[L1] || L1; return `<div class="node ${lvl >= L1 ? "on" : ""} ${lvl + 1 === L1 ? "next" : ""}"><span>${ic}</span></div>`; }).join("")}</div>
       <div class="path-legend"><span>🐣 Малыш</span><span>💪 Спортсмен</span><span>🏅 Профи</span><span>👑 Чемпион</span></div>
@@ -552,6 +675,24 @@
       };
     });
   }
+  function paramsFromBot() {
+    const q = new URLSearchParams(location.search);
+    if (!Store.get("profile")) return false;
+    if (q.get("checkin")) { tab = "home"; setTimeout(() => { if (gymCheckin(true)) render(); }, 400); return true; }
+    const ct = q.get("ct");
+    if (ct !== null && COACH[+ct]) {
+      const key = "ctimp_" + (q.get("cw") || ct);
+      tab = "home";
+      if (!Store.get(key)) {
+        Store.set(key, 1);
+        const cur = coachTask();
+        if (!cur || cur.id !== +ct || coachDone() >= 5) Store.set("coachTask", { id: +ct, from: dkey(), done: {} });
+        setTimeout(() => showPetMoment("🎯", "Новое задание от тренера", COACH[+ct].title + ". Выполни его 5 дней – и Стрелка получит повязку LadyFit!", "happy"), 400);
+      }
+      return true;
+    }
+    return false;
+  }
   function importFromBot() {
     const raw = new URLSearchParams(location.search).get("add");
     if (!raw) return false;
@@ -567,7 +708,8 @@
     });
     Store.set(doneKey, 1);
     tab = "diary"; diaryDate = new Date();
-    setTimeout(() => toast("📷 Блюда с фото добавлены в дневник ✓"), 400);
+    const fed = (data.e || []).slice(0, 12).filter(x => x[0] && +x[1] > 0).map(([n, g, k, p, f, c, cat]) => { const m = +g / 100; return { n, g: +g, cat, k: (+k || 0) * m, p: (+p || 0) * m, f: (+f || 0) * m, c: (+c || 0) * m }; });
+    setTimeout(() => { feedPet(fed, "Блюда с фото – в дневнике ✓"); }, 500);
     return true;
   }
   function openAdd(meal) {
@@ -692,7 +834,8 @@
         $$(".seg button", sh).forEach(b => b.onclick = () => {
           diaryDate = new Date();
           Object.keys(cats).forEach(c => addEntry({ i: plateState[c], g: portion(c), ml: b.dataset.v }, true));
-          closeSheet(); haptic("medium"); toast("Тарелка записана в дневник ✓"); checkAwards();
+          closeSheet(); checkAwards();
+          feedPet(Object.keys(cats).map(c => { const x = P[plateState[c]], m = portion(c) / 100; return { n: x.n, cat: x.cat, g: portion(c), k: x.k * m, p: x.p * m, f: x.f * m, c: x.c * m }; }), "Тарелка – в дневнике ✓");
         });
       });
     };
@@ -790,15 +933,15 @@
       if (d.e.length) { kcSum += totals(d).k; kcDays++; }
       if (d.m) { en += d.m; enN++; }
     });
-    return { t: "summary", n: p.name, act, br, wa, ve, tr, le, kc: kcDays ? r0((kcSum / kcDays / n.kcal) * 100) : 0, en: enN ? r1(en / enN) : 0, pts: weekPoints(), lvl: petLevel(), tasks: tasksDone() };
+    return { t: "summary", n: p.name, act, br, wa, ve, tr, le, kc: kcDays ? r0((kcSum / kcDays / n.kcal) * 100) : 0, en: enN ? r1(en / enN) : 0, pts: weekPoints(), lvl: petLevel(), tasks: tasksDone(), g: days.filter(k => gymDays()[k]).length, ct: coachTask() ? Math.min(5, coachDone()) : null };
   }
   function syncPayload() {
     const test = Store.get("test", {});
     let act10 = 0; for (let i = 0; i < 10; i++) if (habits(dkey(addDays(new Date(), -i))).active) act10++;
-    return { t: "sync", pts: weekPoints(), xp: xpState().xp, lvl: petLevel(), tasks: tasksDone(), day: courseDay(), a10: act10, tb: test.before ? test.before.s : null, ta: test.after ? test.after.s : null, r: Store.get("rating", null), ls: Object.keys(lessonsState().done).length };
+    return { t: "sync", pts: weekPoints(), xp: xpState().xp, lvl: petLevel(), tasks: tasksDone(), day: courseDay(), a10: act10, tb: test.before ? test.before.s : null, ta: test.after ? test.after.s : null, r: Store.get("rating", null), ls: Object.keys(lessonsState().done).length, g: Object.keys(gymDays()).length, rest: Object.keys(restDays()).length };
   }
   function summaryText(s) {
-    return `ПитЛаб · неделя ${s.n}\nАктивных дней: ${s.act}/7\nЗавтрак: ${s.br}/7 · Вода: ${s.wa}/7 · Овощи: ${s.ve}/7\nТренировок: ${s.tr} · Уроков: ${s.le}\nКалории в среднем: ${s.kc}% нормы\nЭнергия: ${s.en || "–"}/5 · Очки челленджей: ${s.pts}`;
+    return `ПитЛаб · неделя ${s.n}\nАктивных дней: ${s.act}/7\nЗавтрак: ${s.br}/7 · Вода: ${s.wa}/7 · Овощи: ${s.ve}/7\nТренировок: ${s.tr} · Уроков: ${s.le}\nКалории в среднем: ${s.kc}% нормы\nЭнергия: ${s.en || "–"}/5 · Очки челленджей: ${s.pts}\nВ зале по QR: ${s.g || 0} раз за неделю${s.ct != null ? `\nЗадание тренера: ${s.ct}/5 дней` : ""}`;
   }
   function sendToBot(obj, okText) {
     const json = JSON.stringify(obj);
@@ -968,11 +1111,11 @@
   Store.init().then(() => {
     const start = new URLSearchParams(location.search).get("tab") || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param);
     if (start && ["home", "diary", "plate", "lessons", "challenges", "profile", "sos"].includes(start)) tab = start;
-    if (importFromBot()) return render();
+    if (importFromBot() || paramsFromBot()) return render();
     if (start) return render();
     splash(() => render());
   });
 
   // для автотестов
-  window.__pitlab = { calcNorm, Store, weekSummary, syncPayload, startTour, celebrate, petLevel, tasksDone, badgeState };
+  window.__pitlab = { calcNorm, Store, weekSummary, syncPayload, startTour, celebrate, petLevel, tasksDone, badgeState, feedPet, gymCheckin, petSVG };
 })();

@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS syncs (
     rating INTEGER,                    -- оценка полезности 1–5
     lessons INTEGER
 );
+CREATE TABLE IF NOT EXISTS checkins (
+    user_id INTEGER, day TEXT, ts INTEGER, PRIMARY KEY (user_id, day)
+);
 CREATE TABLE IF NOT EXISTS reminders_sent (
     kind TEXT, day TEXT, PRIMARY KEY (kind, day)
 );
@@ -53,6 +56,11 @@ def conn():
 def init():
     with closing(conn()) as c:
         c.executescript(SCHEMA)
+        # новые столбцы для старой базы: задания курса и отметки в зале
+        cols = {r[1] for r in c.execute("PRAGMA table_info(syncs)").fetchall()}
+        for col in ("tasks", "gym"):
+            if col not in cols:
+                c.execute(f"ALTER TABLE syncs ADD COLUMN {col} INTEGER")
         c.commit()
 
 
@@ -139,7 +147,7 @@ def leave_group(uid):
 def group_table(code):
     with closing(conn()) as c:
         return c.execute(
-            "SELECT u.id, u.name, COALESCE(s.pts, 0) AS pts, COALESCE(s.lvl, 1) AS lvl, s.ts "
+            "SELECT u.id, u.name, COALESCE(s.pts, 0) AS pts, COALESCE(s.lvl, 1) AS lvl, COALESCE(s.tasks, 0) AS tasks, s.ts "
             "FROM users u LEFT JOIN syncs s ON s.user_id = u.id WHERE u.group_code = ? "
             "ORDER BY pts DESC, lvl DESC, u.name",
             (code,),
@@ -164,13 +172,32 @@ def save_sync(uid, d):
         return int(v) if isinstance(v, (int, float)) else None
     with closing(conn()) as c:
         c.execute(
-            "INSERT INTO syncs (user_id, ts, pts, xp, lvl, a10, tb, ta, rating, lessons) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO syncs (user_id, ts, pts, xp, lvl, a10, tb, ta, rating, lessons, tasks, gym) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(user_id) DO UPDATE SET ts = excluded.ts, pts = excluded.pts, xp = excluded.xp, lvl = excluded.lvl, "
             "a10 = excluded.a10, tb = COALESCE(excluded.tb, syncs.tb), ta = COALESCE(excluded.ta, syncs.ta), "
-            "rating = COALESCE(excluded.rating, syncs.rating), lessons = excluded.lessons",
-            (uid, int(time.time()), num("pts") or 0, num("xp") or 0, num("lvl") or 1, num("a10") or 0, num("tb"), num("ta"), num("r"), num("ls") or 0),
+            "rating = COALESCE(excluded.rating, syncs.rating), lessons = excluded.lessons, tasks = excluded.tasks, gym = excluded.gym",
+            (uid, int(time.time()), num("pts") or 0, num("xp") or 0, num("lvl") or 1, num("a10") or 0, num("tb"), num("ta"), num("r"), num("ls") or 0,
+             num("tasks") or 0, num("g") or 0),
         )
         c.commit()
+
+
+def add_checkin(uid, day):
+    """Отметка в зале по QR. Возвращает (новая ли отметка сегодня, всего отметок)."""
+    with closing(conn()) as c:
+        cur = c.execute("INSERT OR IGNORE INTO checkins (user_id, day, ts) VALUES (?, ?, ?)", (uid, day, int(time.time())))
+        c.commit()
+        total = c.execute("SELECT COUNT(*) FROM checkins WHERE user_id = ?", (uid,)).fetchone()[0]
+        return cur.rowcount == 1, total
+
+
+def checkin_stats(today):
+    with closing(conn()) as c:
+        return {
+            "total": c.execute("SELECT COUNT(*) FROM checkins").fetchone()[0],
+            "people": c.execute("SELECT COUNT(DISTINCT user_id) FROM checkins").fetchone()[0],
+            "today": c.execute("SELECT COUNT(*) FROM checkins WHERE day = ?", (today,)).fetchone()[0],
+        }
 
 
 def set_remind(uid, on):
