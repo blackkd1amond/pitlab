@@ -24,7 +24,7 @@ from aiogram.filters import CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
+    CallbackQuery, ErrorEvent, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
     FSInputFile, MenuButtonWebApp, Message, ReplyKeyboardMarkup, WebAppInfo,
 )
 from pathlib import Path
@@ -120,6 +120,21 @@ def user(m):
     return db.get_user(u.id)
 
 
+async def say(c: CallbackQuery, text: str, reply_markup=None):
+    """Новое сообщение в ответ на нажатие кнопки (работает и для старых сообщений, к которым у бота уже нет доступа)."""
+    return await c.bot.send_message(c.from_user.id, text, reply_markup=reply_markup)
+
+
+async def safe_edit(c: CallbackQuery, text: str, reply_markup=None):
+    """Изменить сообщение с кнопкой. Если не вышло (сообщение старое или текст тот же) – прислать новое."""
+    try:
+        return await safe_edit(c, text, reply_markup=reply_markup)
+    except Exception as e:
+        if "not modified" in str(e):
+            return None
+        return await say(c, text, reply_markup)
+
+
 SOS_TEXT = (
     "💚 <b>Нет мотивации – это нормально.</b>\n\n"
     "Срыв – не провал. Один день ничего не решает: решает то, что ты делаешь чаще всего.\n\n"
@@ -142,9 +157,9 @@ async def start(m: Message, command: CommandObject, state: FSMContext, bot: Bot)
     arg = (command.args or "").strip().upper()
     if arg == "GYM":
         return await gym_checkin(m)
-    if arg.startswith("T"):
+    if re.fullmatch(r"T\d{4}", arg):
         return await link_coach(m, arg, bot)
-    if arg.startswith("G"):
+    if re.fullmatch(r"G\d{4}", arg):
         return await join_group(m, arg)
     caption = (
         f"Привет, <b>{esc(m.from_user.first_name)}</b>! 👋\n"
@@ -203,10 +218,10 @@ def tour_view(i: int):
 async def tour_cb(c: CallbackQuery):
     arg = c.data.split(":", 1)[1]
     if arg == "skip":
-        await c.message.edit_text("Хорошо! Если что – обучение есть в кнопке ❓ Помощь 🐣")
+        await safe_edit(c, "Хорошо! Если что – обучение есть в кнопке ❓ Помощь 🐣")
         return await c.answer()
     if arg == "end":
-        await c.message.edit_text(
+        await safe_edit(c, 
             "🎉 <b>Готово!</b> Теперь ты знаешь все кнопки.\n\nНачнём с малого: открой ПитЛаб и отметь сегодня завтрак или стакан воды. Я жду 🐣",
             reply_markup=ikb([ib("🍏 Открыть ПитЛаб", tab="")]),
         )
@@ -214,7 +229,7 @@ async def tour_cb(c: CallbackQuery):
     i = max(0, min(len(TOUR) - 1, int(arg) if arg.isdigit() else 0))
     text, kb = tour_view(i)
     try:
-        await c.message.edit_text(text, reply_markup=kb)
+        await safe_edit(c, text, reply_markup=kb)
     except Exception:
         pass
     await c.answer()
@@ -253,6 +268,8 @@ async def from_webapp(m: Message, bot: Bot, state: FSMContext):
     kb = main_kb(m.from_user.id)
     try:
         data = json.loads(m.web_app_data.data)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
     except (ValueError, TypeError):
         return await m.answer("Не получилось прочитать данные из приложения 😕 Попробуй ещё раз.", reply_markup=kb)
     kind = data.get("t")
@@ -399,7 +416,7 @@ async def coach_btn(m: Message, state: FSMContext):
 @router.callback_query(F.data == "coach:enter")
 async def coach_enter(c: CallbackQuery, state: FSMContext):
     await state.set_state(Wait.coach_code)
-    await c.message.answer("Напиши код тренера – например, <b>T4821</b>.", reply_markup=cancel_kb())
+    await say(c, "Напиши код тренера – например, <b>T4821</b>.", reply_markup=cancel_kb())
     await c.answer()
 
 
@@ -437,13 +454,13 @@ async def link_coach(m: Message, code: str, bot: Bot):
 @router.callback_query(F.data == "coach:off")
 async def coach_off(c: CallbackQuery):
     db.set_coach(c.from_user.id, None)
-    await c.message.edit_text("Тренер отключён.", reply_markup=ikb([ib("🔑 Подключить снова", "coach:enter")]))
+    await safe_edit(c, "Тренер отключён.", reply_markup=ikb([ib("🔑 Подключить снова", "coach:enter")]))
     await c.answer()
 
 
 @router.callback_query(F.data == "coach:iam")
 async def coach_iam(c: CallbackQuery):
-    await c.message.edit_text(
+    await safe_edit(c, 
         "Вы тренер? Вы получите ссылку для подопечных и будете видеть их недельные сводки.",
         reply_markup=ikb([ib("✅ Да, я тренер", "coach:iam_yes"), ib("Нет", "coach:back")]),
     )
@@ -452,7 +469,7 @@ async def coach_iam(c: CallbackQuery):
 
 @router.callback_query(F.data == "coach:back")
 async def coach_back(c: CallbackQuery):
-    await c.message.edit_text(NO_COACH_TEXT, reply_markup=no_coach_kb())
+    await safe_edit(c, NO_COACH_TEXT, reply_markup=no_coach_kb())
     await c.answer()
 
 
@@ -460,7 +477,7 @@ async def coach_back(c: CallbackQuery):
 async def coach_iam_yes(c: CallbackQuery):
     db.upsert_user(c.from_user.id, c.from_user.first_name, c.from_user.username)
     code = db.make_trainer(c.from_user.id)
-    await c.message.edit_text(trainer_text(c.from_user.id), reply_markup=trainer_kb(code))
+    await safe_edit(c, trainer_text(c.from_user.id), reply_markup=trainer_kb(code))
     await c.answer("Готово!")
 
 
@@ -504,11 +521,10 @@ async def trainer_list(c: CallbackQuery):
     if not u or u["role"] != "trainer":
         return await c.answer("Это для тренеров", show_alert=True)
     text, kb = trainer_text(c.from_user.id), trainer_kb(u["trainer_code"])
-    try:
-        await c.message.edit_text(text, reply_markup=kb)
-    except Exception:  # текст не изменился или это уведомление, а не кабинет
-        if not (c.message.text or "").startswith("👟 Кабинет"):
-            await c.message.answer(text, reply_markup=kb)
+    if c.message and (getattr(c.message, "text", None) or "").startswith("👟 Кабинет"):
+        await safe_edit(c, text, reply_markup=kb)
+    else:  # нажали в уведомлении – присылаем кабинет отдельным сообщением
+        await say(c, text, reply_markup=kb)
     await c.answer("Обновлено")
 
 
@@ -554,7 +570,7 @@ async def coach_task_menu(c: CallbackQuery):
         return await c.answer("Это для тренеров", show_alert=True)
     rows = [[ib(f"🎯 {t}", f"tt:{i}")] for i, t in enumerate(COACH_TASKS)]
     rows.append([ib("◀️ Назад", "tr:list")])
-    await c.message.answer(
+    await say(c, 
         "🎯 <b>Задание недели для подопечных</b>\n\nВыберите задание – оно придёт всем подключённым подросткам. "
         "Кто выполнит его 5 дней, получит для Стрелки фирменную повязку LadyFit, а вы увидите прогресс в сводке.",
         reply_markup=ikb(*rows))
@@ -583,7 +599,7 @@ async def coach_task_send(c: CallbackQuery, bot: Bot):
         except Exception as e:
             logging.info("Задание не доставлено %s: %s", s["id"], e)
         await asyncio.sleep(0.05)
-    await c.message.edit_text(f"✅ Задание «{COACH_TASKS[i]}» отправлено подопечным: {sent}."
+    await safe_edit(c, f"✅ Задание «{COACH_TASKS[i]}» отправлено подопечным: {sent}."
                               + ("" if sent else "\nПока никто не подключён – отправьте им ссылку-приглашение."),
                               reply_markup=ikb([ib("👥 Мои подопечные", "tr:list")]))
     await c.answer("Отправлено")
@@ -651,7 +667,7 @@ async def group_new(c: CallbackQuery):
     db.upsert_user(c.from_user.id, c.from_user.first_name, c.from_user.username)
     u = db.get_user(c.from_user.id)
     code = u["group_code"] or db.create_group(c.from_user.id)
-    await c.message.edit_text(
+    await safe_edit(c, 
         "🎉 <b>Группа создана!</b>\n\nНажми «Пригласить друзей» и выбери, кому отправить ссылку. "
         "Друг откроет её – и сразу окажется в группе.\n\n" + table_text(code, c.from_user.id),
         reply_markup=group_kb(code),
@@ -662,7 +678,7 @@ async def group_new(c: CallbackQuery):
 @router.callback_query(F.data == "grp:join")
 async def group_join_ask(c: CallbackQuery, state: FSMContext):
     await state.set_state(Wait.group_code)
-    await c.message.answer("Напиши код группы – например, <b>G1234</b>.\nА если у тебя есть ссылка от друга – просто открой её.",
+    await say(c, "Напиши код группы – например, <b>G1234</b>.\nА если у тебя есть ссылка от друга – просто открой её.",
                            reply_markup=cancel_kb())
     await c.answer()
 
@@ -689,10 +705,10 @@ async def join_group(m: Message, code: str):
 async def group_refresh(c: CallbackQuery):
     u = db.get_user(c.from_user.id)
     if not u or not u["group_code"]:
-        await c.message.edit_text("Ты сейчас не в группе.", reply_markup=no_group_kb())
+        await safe_edit(c, "Ты сейчас не в группе.", reply_markup=no_group_kb())
         return await c.answer()
     try:
-        await c.message.edit_text(table_text(u["group_code"], c.from_user.id), reply_markup=group_kb(u["group_code"]))
+        await safe_edit(c, table_text(u["group_code"], c.from_user.id), reply_markup=group_kb(u["group_code"]))
     except Exception:
         pass  # таблица не изменилась
     await c.answer("Обновлено")
@@ -731,20 +747,23 @@ async def group_nudge(c: CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data == "grp:leave")
 async def group_leave_ask(c: CallbackQuery):
-    await c.message.edit_reply_markup(reply_markup=ikb([ib("Да, выйти", "grp:leave_yes"), ib("Остаться", "grp:refresh")]))
+    try:
+        await c.message.edit_reply_markup(reply_markup=ikb([ib("Да, выйти", "grp:leave_yes"), ib("Остаться", "grp:refresh")]))
+    except Exception:
+        await say(c, "Точно выйти из группы?", ikb([ib("Да, выйти", "grp:leave_yes"), ib("Остаться", "grp:refresh")]))
     await c.answer("Точно выйти?")
 
 
 @router.callback_query(F.data == "grp:leave_yes")
 async def group_leave(c: CallbackQuery):
     db.leave_group(c.from_user.id)
-    await c.message.edit_text("Ты вышел из группы.", reply_markup=no_group_kb())
+    await safe_edit(c, "Ты вышел из группы.", reply_markup=no_group_kb())
     await c.answer()
 
 
 # ------------------------------------------------------------------ Напоминания и поддержка
 def remind_view(on: bool):
-    text = (f"⏰ Напоминания <b>включены</b>.\nУтром в {REMIND_MORNING} – про завтрак, вечером в {REMIND_EVENING} – подвести итоги дня."
+    text = (f"⏰ Напоминания <b>включены</b>.\nУтром в {RM} – про завтрак, вечером в {RE_} – подвести итоги дня."
             if on else "⏰ Напоминания <b>выключены</b>.")
     return text, ikb([ib("🔕 Выключить", "rem:off") if on else ib("🔔 Включить", "rem:on")])
 
@@ -763,7 +782,7 @@ async def remind_toggle(c: CallbackQuery):
     on = c.data == "rem:on"
     db.set_remind(c.from_user.id, on)
     text, kb = remind_view(on)
-    await c.message.edit_text(text, reply_markup=kb)
+    await safe_edit(c, text, reply_markup=kb)
     await c.answer("Включены" if on else "Выключены")
 
 
@@ -803,7 +822,7 @@ async def stats(m: Message, state: FSMContext):
 async def stats_refresh(c: CallbackQuery):
     if c.from_user.id in ADMIN_IDS:
         try:
-            await c.message.edit_text(stats_text(), reply_markup=ikb([ib("🔄 Обновить", "stats:refresh")]))
+            await safe_edit(c, stats_text(), reply_markup=ikb([ib("🔄 Обновить", "stats:refresh")]))
         except Exception:
             pass
     await c.answer("Обновлено")
@@ -821,6 +840,34 @@ async def fallback(m: Message, bot: Bot):
     await m.answer(f"Пользуйся кнопками внизу 👇 Приложение – <b>{BTN_APP}</b>.", reply_markup=main_kb(m.from_user.id))
 
 
+@router.message()
+async def fallback_any(m: Message):
+    # стикеры, голосовые, документы и всё остальное
+    await m.answer(f"Я понимаю кнопки внизу и фото тарелки 📷 Приложение – <b>{BTN_APP}</b>.", reply_markup=main_kb(m.from_user.id))
+
+
+@router.callback_query()
+async def stale_button(c: CallbackQuery):
+    # кнопка из старой версии бота, которой больше нет
+    await c.answer("Эта кнопка устарела 🙂 Пользуйся меню внизу.", show_alert=True)
+    await say(c, "Меню обновилось 👇", main_kb(c.from_user.id))
+
+
+@router.errors()
+async def on_error(event: ErrorEvent):
+    logging.exception("Ошибка при обработке: %s", event.exception)
+    upd = event.update
+    try:
+        if upd.callback_query:
+            await upd.callback_query.answer("Не получилось 😕 Попробуй ещё раз", show_alert=True)
+        elif upd.message:
+            await upd.message.answer("Упс, что-то пошло не так 😕 Попробуй ещё раз или нажми ❓ Помощь.",
+                                     reply_markup=main_kb(upd.message.from_user.id))
+    except Exception:
+        pass
+    return True
+
+
 # ------------------------------------------------------------------ Напоминания по расписанию
 MORNING_TEXTS = [
     "🍳 Доброе утро! Завтрак – топливо для учёбы и тренировки. Отметь его в ПитЛабе – Стрелка будет рада.",
@@ -830,6 +877,17 @@ EVENING_TEXTS = [
     "🌙 Как прошёл день? Отметь воду и самочувствие в ПитЛабе – это 30 секунд.",
     "📚 Вечер – отличное время для урока на 2 минуты. Заходи в ПитЛаб!",
 ]
+
+
+def _hhmm(s: str, default: str) -> str:
+    """«8:00», «08.00», «8» → «08:00» (иначе время напоминания не сработает)."""
+    m = re.fullmatch(r"\s*(\d{1,2})(?:[:.](\d{2}))?\s*", s or "")
+    if not m or int(m.group(1)) > 23 or int(m.group(2) or 0) > 59:
+        return default
+    return f"{int(m.group(1)):02d}:{int(m.group(2) or 0):02d}"
+
+
+RM, RE_ = _hhmm(REMIND_MORNING, "08:00"), _hhmm(REMIND_EVENING, "20:00")
 
 
 def _plus_minutes(hhmm: str, minutes: int) -> str:
@@ -844,7 +902,7 @@ async def reminders_loop(bot: Bot):
         try:
             now = datetime.now(TZ)
             hm, day = now.strftime("%H:%M"), now.strftime("%Y-%m-%d")
-            for kind, at, texts in (("morning", REMIND_MORNING, MORNING_TEXTS), ("evening", REMIND_EVENING, EVENING_TEXTS)):
+            for kind, at, texts in (("morning", RM, MORNING_TEXTS), ("evening", RE_, EVENING_TEXTS)):
                 if at <= hm < _plus_minutes(at, 30) and not db.reminder_done(kind, day):
                     text = texts[now.toordinal() % len(texts)]
                     for uid in db.remind_users():
@@ -868,13 +926,20 @@ async def main():
     BOT_USERNAME = (await bot.get_me()).username
     dp = Dispatcher()
     dp.include_router(router)
-    await bot.delete_my_commands()  # никаких команд со слешем – только кнопки
+    try:
+        await bot.delete_webhook(drop_pending_updates=False)  # если когда-то был вебхук – иначе бот не получит сообщения
+        await bot.delete_my_commands()  # никаких команд со слешем – только кнопки
+    except Exception as e:
+        logging.warning("Не удалось сбросить вебхук/команды: %s", e)
     try:
         await bot.set_my_description(description=DESCRIPTION)
         await bot.set_my_short_description(short_description=SHORT_DESCRIPTION)
     except Exception as e:
         logging.warning("Не удалось обновить описание бота: %s", e)
-    await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="ПитЛаб", web_app=WebAppInfo(url=WEBAPP_URL)))
+    try:
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="ПитЛаб", web_app=WebAppInfo(url=WEBAPP_URL)))
+    except Exception as e:
+        logging.warning("Не удалось поставить кнопку меню: %s", e)
     asyncio.create_task(reminders_loop(bot))
     logging.info("ПитЛаб @%s запущен. Остановить: Ctrl+C", BOT_USERNAME)
     await dp.start_polling(bot)

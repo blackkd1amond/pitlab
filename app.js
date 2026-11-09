@@ -38,6 +38,11 @@
         if (k && k.startsWith("pl_")) { try { this.data[k.slice(3)] = JSON.parse(localStorage.getItem(k)); } catch (e) {} }
       }
       if (!hasCloud) return;
+      // если облако Telegram не ответило за 3 секунды – запускаемся с локальными данными, чтобы не висеть на пустом экране
+      const timeout = new Promise(res => setTimeout(res, 3000));
+      await Promise.race([this.loadCloud(), timeout]);
+    },
+    async loadCloud() {
       try {
         const keys = await new Promise((res, rej) => tg.CloudStorage.getKeys((e, k) => e ? rej(e) : res(k || [])));
         for (let i = 0; i < keys.length; i += 20) {
@@ -72,6 +77,13 @@
     },
     keys() { return Object.keys(this.data); },
   };
+  // Безопасное чтение: если в хранилище оказалось что-то не того вида (старая версия, сбой) – берём значение по умолчанию
+  const isObj = v => !!v && typeof v === "object" && !Array.isArray(v);
+  const getObj = (k, def) => { const v = Store.get(k); return isObj(v) ? v : def; };
+  function validProfile(p) {
+    return isObj(p) && (p.sex === "f" || p.sex === "m") && +p.age >= 10 && +p.age <= 19 && +p.h >= 120 && +p.h <= 220 && +p.w >= 30 && +p.w <= 150;
+  }
+  const profile = () => { const p = Store.get("profile"); return validProfile(p) ? p : null; };
 
   // ---------------------------------------------------------------- Даты
   const pad = n => String(n).padStart(2, "0");
@@ -120,7 +132,17 @@
 
   // ---------------------------------------------------------------- Дни
   const emptyDay = () => ({ e: [], w: 0, t: 0, m: 0, ns: 0 });
-  const getDay = k => Object.assign(emptyDay(), Store.get("day_" + k, {}));
+  // День из хранилища приводим к правильному виду: старые или повреждённые данные не должны ломать приложение
+  const num0 = x => { const v = +x; return isFinite(v) && v > 0 ? v : 0; };
+  function getDay(k) {
+    const raw = Store.get("day_" + k, {});
+    const d = raw && typeof raw === "object" ? raw : {};
+    const e = (Array.isArray(d.e) ? d.e : []).filter(x => x && typeof x === "object" && ((+x.i >= 0 && P[+x.i]) || (x.i == -1 && x.n)) && num0(x.g) > 0)
+      .map(x => +x.i >= 0 ? Object.assign({}, x, { i: +x.i, g: num0(x.g), ml: MEAL_IDS.includes(x.ml) ? x.ml : "s" })
+        : Object.assign({}, x, { i: -1, n: String(x.n), g: num0(x.g), k: num0(x.k), p: num0(x.p), f: num0(x.f), c: num0(x.c), ml: MEAL_IDS.includes(x.ml) ? x.ml : "s" }));
+    return { e, w: Math.min(30, Math.round(num0(d.w))), t: d.t ? 1 : 0, m: Math.min(5, Math.round(num0(d.m))), ns: d.ns ? 1 : 0 };
+  }
+  const MEAL_IDS = ["b", "l", "d", "s"];
   const setDay = (k, d) => Store.set("day_" + k, d);
   const MEALS = [
     { id: "b", label: "Завтрак", icon: "🍳" },
@@ -140,7 +162,7 @@
   }
 
   // ---------------------------------------------------------------- Привычки, очки, питомец
-  const lessonsState = () => Store.get("lessons", { done: {}, score: {} });
+  const lessonsState = () => { const l = getObj("lessons", {}); return { done: isObj(l.done) ? l.done : {}, score: isObj(l.score) ? l.score : {} }; };
   function habits(k) {
     const d = getDay(k);
     const ls = lessonsState();
@@ -156,7 +178,7 @@
       active: d.e.length > 0 || d.w > 0 || lessonToday || d.m > 0 || d.t,
     };
   }
-  function xpState() { return Store.get("xp", { xp: 0, aw: {} }); }
+  function xpState() { const x = getObj("xp", {}); return { xp: isFinite(+x.xp) ? +x.xp : 0, aw: isObj(x.aw) ? x.aw : {} }; }
   function award(key, amount, label) {
     const s = xpState();
     const id = dkey() + ":" + key;
@@ -181,9 +203,9 @@
 
   // ---------------------------------------------------------------- Зал, день отдыха, задание тренера
   const REST_MAX = 3;
-  const gymDays = () => Store.get("gym", {});
+  const gymDays = () => getObj("gym", {});
   const gymToday = () => !!gymDays()[dkey()];
-  const restDays = () => Store.get("rest", {});
+  const restDays = () => getObj("rest", {});
   const isRest = k => !!restDays()[k];
   const restLeft = () => REST_MAX - Object.keys(restDays()).length;
   function gymCheckin(fromBot) {
@@ -228,7 +250,7 @@
     });
   }
   const COACH = window.COACH_TASKS || [];
-  const coachTask = () => { const c = Store.get("coachTask", null); return c && COACH[c.id] ? c : null; };
+  const coachTask = () => { const c = getObj("coachTask", null); if (!c || !COACH[c.id]) return null; if (!isObj(c.done)) c.done = {}; return c; };
   const coachDone = () => { const c = coachTask(); return c ? Object.keys(c.done || {}).length : 0; };
   const hasLF = () => !!Store.get("lf", false);
   function markCoach() {
@@ -288,8 +310,10 @@
   ];
   const keyToDate = k => new Date(+k.slice(0, 4), +k.slice(4, 6) - 1, +k.slice(6, 8));
   function course() {
-    let c = Store.get("course", null);
+    let c = getObj("course", null);
+    if (c && (!/^\d{8}$/.test(String(c.start)) || !isObj(c.done))) c = { start: /^\d{8}$/.test(String(c.start)) ? c.start : dkey(), done: isObj(c.done) ? c.done : {}, seen: +c.seen || 0 };
     if (!c) { c = { start: dkey(), done: {}, seen: 0 }; Store.set("course", c); }
+    Object.keys(c.done).forEach(k => { if (!/^\d{8}$/.test(k) || !isObj(c.done[k])) delete c.done[k]; });
     return c;
   }
   function courseDay() {
@@ -332,7 +356,7 @@
     };
   }
   function checkBadges() {
-    const st = badgeState(), got = Store.get("badges", {});
+    const st = badgeState(), got = getObj("badges", {});
     const fresh = BADGES.filter(b => st[b.id] && !got[b.id]);
     if (!fresh.length) return;
     fresh.forEach(b => got[b.id] = dkey()); Store.set("badges", got);
@@ -467,7 +491,7 @@
 
   // ---------------------------------------------------------------- Онбординг
   function renderOnboarding(edit) {
-    const p = Store.get("profile", { name: (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.first_name) || "", sex: "", age: 15, h: 165, w: 55, act: 1, goal: "keep" });
+    const p = Object.assign({ name: (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.first_name) || "", sex: "", age: 15, h: 165, w: 55, act: 1, goal: "keep" }, getObj("profile", {}));
     $("#tabs").style.display = edit ? "" : "none";
     view.innerHTML = `
       <div class="card blue">
@@ -507,7 +531,7 @@
     };
   }
   function renderNormResult() {
-    const p = Store.get("profile"); const n = calcNorm(p);
+    const p = profile() || {}; const n = calcNorm(p);
     view.innerHTML = `
       <div class="card blue" style="text-align:center">
         <div class="eyebrow" style="color:#E4F0E7">Твоя безопасная норма</div>
@@ -524,12 +548,12 @@
         <p class="muted small" style="margin-top:12px">Расчёт по формуле Шофилда для 10–18 лет с учётом тренировок. Норма никогда не опускается ниже безопасного уровня. Это ориентир, а не медицинская рекомендация.</p>
       </div>
       <button class="btn" id="start">Поехали!</button>`;
-    $("#start").onclick = () => { $("#tabs").style.display = ""; go("home"); };
+    $("#start").onclick = () => { $("#tabs").style.display = ""; go("home"); const pq = Store.get("pendingQ"); if (pq) { Store.remove("pendingQ"); if (paramsFromBot(pq)) setTimeout(render, 450); } };
   }
 
   // ---------------------------------------------------------------- Главная
   function renderHome() {
-    const p = Store.get("profile"); const n = calcNorm(p);
+    const p = profile() || {}; const n = calcNorm(p);
     syncTasks();
     const k = dkey(); const d = getDay(k); const t = totals(d); const h = habits(k);
     const lvl = petLevel(); const pm = petMood(); const st = stageOf(lvl);
@@ -537,7 +561,7 @@
     const today = course().done[k] || {}; const ts = taskState(k);
     const plan = TD[(day - 1) % TD.length];
     const doneToday = TASKS.filter(x => today[x.id]).length;
-    const test = Store.get("test", {});
+    const test = getObj("test", {});
     const ls = lessonsState();
     const next = L.find(x => !ls.done[x.id]);
     const inLvl = lvl >= 10 ? 2 : done - lvl * 2;
@@ -574,7 +598,7 @@
 
       <div class="tiles">
         <button class="tile" id="openPath"><b>🗺️</b><span>Путь Стрелки</span><i>${done}/30</i></button>
-        <button class="tile" id="openBadges"><b>🏅</b><span>Значки</span><i id="bdgN">${Object.keys(Store.get("badges", {})).length}/${BADGES.length}</i></button>
+        <button class="tile" id="openBadges"><b>🏅</b><span>Значки</span><i id="bdgN">${Object.keys(getObj("badges", {})).length}/${BADGES.length}</i></button>
       </div>
       ${!test.before ? `<button class="card promo slim" id="testBefore"><span>📝 Тест «до» – 10 вопросов</span><b>Пройти ›</b></button>` : ""}`;
     $$(".t-btn").forEach(b => b.onclick = e => {
@@ -600,7 +624,7 @@
       <div class="path">${Array.from({ length: 10 }, (_, i) => { const L1 = i + 1; const ic = { 1: "🐣", 4: "💪", 7: "🏅", 10: "👑" }[L1] || L1; return `<div class="node ${lvl >= L1 ? "on" : ""} ${lvl + 1 === L1 ? "next" : ""}"><span>${ic}</span></div>`; }).join("")}</div>
       <div class="path-legend"><span>🐣 Малыш</span><span>💪 Спортсмен</span><span>🏅 Профи</span><span>👑 Чемпион</span></div>
       <p class="muted small" style="margin-top:12px">${esc(st.text)}</p>`);
-    $("#openBadges").onclick = () => { const got = Store.get("badges", {});
+    $("#openBadges").onclick = () => { const got = getObj("badges", {});
       openSheet(`<h2>Мои значки</h2><p class="muted">${Object.keys(got).length} из ${BADGES.length} · нажми на значок, чтобы узнать, как его получить</p>
         <div class="badges">${BADGES.map(b => `<button class="bdg ${got[b.id] ? "on" : ""}" data-b="${b.id}"><span>${b.icon}</span><i>${esc(b.title)}</i></button>`).join("")}</div>
         <p class="muted small" id="bdgHint" style="margin-top:12px;min-height:18px"></p>`, sh => {
@@ -621,7 +645,7 @@
 
   // ---------------------------------------------------------------- Дневник
   function renderDiary() {
-    const p = Store.get("profile"); const n = calcNorm(p);
+    const p = profile() || {}; const n = calcNorm(p);
     const k = dkey(diaryDate); const d = getDay(k); const t = totals(d);
     const isToday = k === dkey();
     view.innerHTML = `
@@ -675,9 +699,13 @@
       };
     });
   }
-  function paramsFromBot() {
-    const q = new URLSearchParams(location.search);
-    if (!Store.get("profile")) return false;
+  function paramsFromBot(qs) {
+    const q = new URLSearchParams(qs !== undefined ? qs : location.search);
+    if (!profile()) {
+      // ещё не зарегистрирован: запомним отметку в зале или задание тренера и применим после знакомства
+      if (q.get("checkin") || q.get("ct") !== null) Store.set("pendingQ", q.toString());
+      return false;
+    }
     if (q.get("checkin")) { tab = "home"; setTimeout(() => { if (gymCheckin(true)) render(); }, 400); return true; }
     const ct = q.get("ct");
     if (ct !== null && COACH[+ct]) {
@@ -697,11 +725,13 @@
     const raw = new URLSearchParams(location.search).get("add");
     if (!raw) return false;
     let data; try { data = JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { return false; }
+    if (!data || typeof data !== "object") return false;
     const doneKey = "imp_" + (data.id || raw.slice(0, 24));
     if (Store.get(doneKey)) { tab = "diary"; return true; }
     const meal = data.m || Store.get("photoMeal") || defaultMeal();
     const num = x => Math.max(0, Math.round((+x || 0) * 10) / 10);
-    (data.e || []).slice(0, 12).forEach(x => {
+    (Array.isArray(data.e) ? data.e : []).slice(0, 12).forEach(x => {
+      if (!Array.isArray(x)) return;
       const [n, g, k, p, f, c, cat] = x;
       if (!n || !(+g > 0)) return;
       addEntry({ i: -1, n: String(n).slice(0, 40), g: Math.round(+g), k: num(k), p: num(p), f: num(f), c: num(c), cat: ["veg", "prot", "carb", "dairy", "snack", "drink", "ready"].includes(cat) ? cat : "ready", ml: meal, ph: 1 }, true);
@@ -843,7 +873,7 @@
 
   // ---------------------------------------------------------------- Уроки и тесты
   function renderLessons() {
-    const ls = lessonsState(); const test = Store.get("test", {});
+    const ls = lessonsState(); const test = getObj("test", {});
     const done = Object.keys(ls.done).length;
     view.innerHTML = `
       <div class="card blue"><div class="eyebrow" style="color:#E4F0E7">Уроки ПитЛаба</div><h2>${done} из ${L.length} пройдено</h2>
@@ -893,7 +923,7 @@
     const box = $("#tq");
     const step = () => {
       if (qi >= KT.length) {
-        const test = Store.get("test", {}); test[kind] = { s: score, d: dkey() }; Store.set("test", test);
+        const test = getObj("test", {}); test[kind] = { s: score, d: dkey() }; Store.set("test", test);
         box.innerHTML = `<h3>Результат: ${score} из 10</h3>
           ${kind === "after" && test.before ? `<p class="muted">До пилота было ${test.before.s}/10. ${score > test.before.s ? "Ты стал разбираться лучше! 🎉" : "Пройди ещё пару уроков и попробуй снова."}</p>` : `<p class="muted">В конце пилота пройдёшь такой же тест – и мы увидим, как выросли знания.</p>`}
           <button class="btn" id="tOk">Готово</button>`;
@@ -924,7 +954,7 @@
 
   // ---------------------------------------------------------------- Профиль, тренер
   function weekSummary() {
-    const p = Store.get("profile"); const n = calcNorm(p);
+    const p = profile() || {}; const n = calcNorm(p);
     const days = Array.from({ length: 7 }, (_, i) => dkey(addDays(new Date(), -i)));
     let act = 0, br = 0, wa = 0, ve = 0, tr = 0, kcSum = 0, kcDays = 0, en = 0, enN = 0, le = 0;
     days.forEach(k => {
@@ -936,7 +966,7 @@
     return { t: "summary", n: p.name, act, br, wa, ve, tr, le, kc: kcDays ? r0((kcSum / kcDays / n.kcal) * 100) : 0, en: enN ? r1(en / enN) : 0, pts: weekPoints(), lvl: petLevel(), tasks: tasksDone(), g: days.filter(k => gymDays()[k]).length, ct: coachTask() ? Math.min(5, coachDone()) : null };
   }
   function syncPayload() {
-    const test = Store.get("test", {});
+    const test = getObj("test", {});
     let act10 = 0; for (let i = 0; i < 10; i++) if (habits(dkey(addDays(new Date(), -i))).active) act10++;
     return { t: "sync", pts: weekPoints(), xp: xpState().xp, lvl: petLevel(), tasks: tasksDone(), day: courseDay(), a10: act10, tb: test.before ? test.before.s : null, ta: test.after ? test.after.s : null, r: Store.get("rating", null), ls: Object.keys(lessonsState().done).length, g: Object.keys(gymDays()).length, rest: Object.keys(restDays()).length };
   }
@@ -961,7 +991,7 @@
     });
   }
   function renderProfile() {
-    const p = Store.get("profile"); const n = calcNorm(p); const rating = Store.get("rating", null);
+    const p = profile() || {}; const n = calcNorm(p); const rating = Store.get("rating", null);
     const s = weekSummary();
     view.innerHTML = `
       <div class="card blue"><div class="row between"><div><div class="eyebrow" style="color:#E4F0E7">Профиль</div><h2>${esc(p.name)}</h2>
@@ -1076,7 +1106,7 @@
   // ---------------------------------------------------------------- Маршрутизация
   function markTabs() { $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab)); }
   function render() {
-    if (!Store.get("profile")) return renderOnboarding(false);
+    if (!profile()) return renderOnboarding(false);
     $("#tabs").style.display = "";
     markTabs();
     ({ home: renderHome, diary: renderDiary, plate: renderPlate, lessons: renderLessons, challenges: renderChallenges, profile: renderProfile, sos: renderSOS }[tab] || renderHome)();
@@ -1095,7 +1125,7 @@
 
   // ---------------------------------------------------------------- Заставка
   function splash(onStart) {
-    const isNew = !Store.get("profile");
+    const isNew = !profile();
     const lvl = isNew ? 0 : petLevel();
     const el = document.createElement("div"); el.id = "splash";
     el.innerHTML = `<div class="sp-rings"><i></i><i></i><i></i></div>

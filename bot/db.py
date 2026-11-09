@@ -56,11 +56,17 @@ def conn():
 def init():
     with closing(conn()) as c:
         c.executescript(SCHEMA)
-        # новые столбцы для старой базы: задания курса и отметки в зале
-        cols = {r[1] for r in c.execute("PRAGMA table_info(syncs)").fetchall()}
-        for col in ("tasks", "gym"):
-            if col not in cols:
-                c.execute(f"ALTER TABLE syncs ADD COLUMN {col} INTEGER")
+        # старая база: досоздаём все столбцы, которых в ней ещё нет (сравниваем с эталонной схемой)
+        ref = sqlite3.connect(":memory:")
+        ref.executescript(SCHEMA)
+        extra = {"syncs": [(0, "tasks", "INTEGER", 0, None, 0), (0, "gym", "INTEGER", 0, None, 0)]}
+        for (table,) in ref.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+            want = ref.execute(f"PRAGMA table_info({table})").fetchall() + extra.get(table, [])
+            have = {r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
+            for _, col, typ, _nn, dflt, pk in want:
+                if col not in have and not pk:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}" + (f" DEFAULT {dflt}" if dflt is not None else ""))
+        ref.close()
         c.commit()
 
 
