@@ -105,14 +105,21 @@
       el.classList.toggle("talk", !paused);
       if (snd && canSpeak && !paused) speak(s.say);
     }
-    const PRE = [["Мягкий", 1.2, 0.97], ["Спокойный", 1.0, 0.92], ["Бодрый", 1.3, 1.1], ["Низкий", 0.8, 1.0]];
-    let vsel = 0; try { vsel = +localStorage.getItem("pl_voice") || 0; } catch (e) {}
+    const PRE = [["Мягкий", 1.15, 0.95], ["Спокойный", 1.0, 0.9], ["Бодрый", 1.3, 1.1], ["Низкий", 0.8, 1.0]];
+    let vsel = 1; try { const sv = localStorage.getItem("pl_voice"); if (sv !== null) vsel = +sv || 0; } catch (e) {}
     const combos = () => { const vs = canSpeak ? synth.getVoices().filter(v => /^ru/i.test(v.lang)).sort((a, b) => rank(b) - rank(a)) : [], c = [];
       PRE.forEach(p => c.push({ v: vs[0] || null, p, label: p[0] + (vs[0] ? " · " + vs[0].name.replace(/Microsoft |Google |\s*-.*$/g, "") : "") }));
       vs.slice(1).forEach(v => c.push({ v, p: PRE[0], label: v.name.replace(/Microsoft |Google |\s*-.*$/g, "") })); return c; };
+    // текст для озвучки: без тире, двоеточий, кавычек и скобок – вместо них паузы, цифры и единицы словами
+    const speechText = t => String(t)
+      .replace(/(\d)\s*[–—-]\s*(\d)/g, "$1 или $2 ").replace(/\s+[–—-]\s+/g, ", ").replace(/[–—]/g, ", ")
+      .replace(/(\d+)\s*ккал/gi, "$1 килокалорий").replace(/ккал/gi, "килокалорий").replace(/(\d+)\s*%/g, "$1 процентов")
+      .replace(/(\d+)\s*г(?![а-яё])/gi, "$1 грамм").replace(/(\d+)\s*мл(?![а-яё])/gi, "$1 миллилитров").replace(/КБЖУ/g, "ка бэ же у").replace(/БЖУ/g, "бэ же у")
+      .replace(/:/g, ",").replace(/[«»"“”()\[\]]/g, "").replace(/;/g, ",").replace(/…/g, ".").replace(/\s*\/\s*/g, " или ").replace(/\+/g, " плюс ")
+      .replace(/[\u{1F000}-\u{1FFFF}\u2600-\u27BF]/gu, "").replace(/\s+,/g, ",").replace(/,\s*,/g, ",").replace(/\s{2,}/g, " ").trim();
     function speak(text) {
       try {
-        synth.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = "ru-RU"; const cs = combos(), cb = cs[vsel % (cs.length || 1)]; if (cb) { if (cb.v) u.voice = cb.v; u.pitch = cb.p[1]; u.rate = cb.p[2]; } else { const v = voice(); if (v) u.voice = v; }
+        synth.cancel(); const u = new SpeechSynthesisUtterance(speechText(text)); u.lang = "ru-RU"; const cs = combos(), cb = cs[vsel % (cs.length || 1)]; if (cb) { if (cb.v) u.voice = cb.v; u.pitch = cb.p[1]; u.rate = cb.p[2]; } else { const v = voice(); if (v) u.voice = v; }
         const my = idx; u.onend = () => { if (snd && !paused && idx === my && elapsed > 600) { spoke = true; } };
         synth.speak(u);
       } catch (e) {}
