@@ -75,7 +75,7 @@
       <div class="vid-props"></div>
       <div class="vid-stage"><div class="vid-pet"></div><div class="vid-say"><div class="vid-text"></div></div></div>
       <div class="vid-ctl"><button data-a="prev" aria-label="Назад">⏮</button><button data-a="play" class="big" aria-label="Пауза">⏸</button><button data-a="next" aria-label="Дальше">⏭</button>
-        <button data-a="snd" aria-label="Звук">${canSpeakNow() ? "🔊" : "🔇"}</button></div>
+        <button data-a="voice" aria-label="Сменить голос">🗣</button><button data-a="snd" aria-label="Звук">${canSpeakNow() ? "🔊" : "🔇"}</button></div>
       <div class="vid-end"><div class="vid-end-in"><div class="vid-end-pet"></div><h2>${esc(o.endTitle || "Урок посмотрен!")}</h2><p>${esc(o.endText || "")}</p>
         ${o.cta ? `<button class="btn" data-a="cta">${esc(o.cta.label)}</button>` : ""}<button class="btn ghost" data-a="again" style="margin-top:8px">↻ Посмотреть ещё раз</button>
         <button class="btn ghost" data-a="close" style="margin-top:8px">${esc(o.closeLabel || "Закрыть")}</button></div></div>`;
@@ -88,7 +88,7 @@
     // голос: берём лучший женский русский голос устройства (приоритет – «Елена», затем Милена, Алёна, Светлана, Google/нейро-голоса)
     const rank = v => /elena|yelena|елена/i.test(v.name) ? 100 : /milena|alena|алена|алёна|svetlana|светлана|irina|ирина|dariya|дарья|katya|катя|google|yandex|natural|neural|online/i.test(v.name) ? 50 : /pavel|павел|yuri|юрий|dmitri|дмитрий|male/i.test(v.name) ? -10 : 10;
     const voice = () => { if (!canSpeak) return null; const vs = synth.getVoices().filter(v => /^ru/i.test(v.lang)); return vs.sort((a, b) => rank(b) - rank(a))[0] || null; };
-    if (!canSpeak) $('[data-a="snd"]').style.display = "none";
+    if (!canSpeak) { $('[data-a="snd"]').style.display = "none"; $('[data-a="voice"]').style.display = "none"; }
 
     function show(i) {
       idx = i; ended = false; el.classList.remove("done");
@@ -105,9 +105,14 @@
       el.classList.toggle("talk", !paused);
       if (snd && canSpeak && !paused) speak(s.say);
     }
+    const PRE = [["Мягкий", 1.2, 0.97], ["Спокойный", 1.0, 0.92], ["Бодрый", 1.3, 1.1], ["Низкий", 0.8, 1.0]];
+    let vsel = 0; try { vsel = +localStorage.getItem("pl_voice") || 0; } catch (e) {}
+    const combos = () => { const vs = canSpeak ? synth.getVoices().filter(v => /^ru/i.test(v.lang)).sort((a, b) => rank(b) - rank(a)) : [], c = [];
+      PRE.forEach(p => c.push({ v: vs[0] || null, p, label: p[0] + (vs[0] ? " · " + vs[0].name.replace(/Microsoft |Google |\s*-.*$/g, "") : "") }));
+      vs.slice(1).forEach(v => c.push({ v, p: PRE[0], label: v.name.replace(/Microsoft |Google |\s*-.*$/g, "") })); return c; };
     function speak(text) {
       try {
-        synth.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = "ru-RU"; const v = voice(); if (v) u.voice = v; u.rate = 1.0; u.pitch = 1.1;
+        synth.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = "ru-RU"; const cs = combos(), cb = cs[vsel % (cs.length || 1)]; if (cb) { if (cb.v) u.voice = cb.v; u.pitch = cb.p[1]; u.rate = cb.p[2]; } else { const v = voice(); if (v) u.voice = v; }
         const my = idx; u.onend = () => { if (snd && !paused && idx === my && elapsed > 600) { spoke = true; } };
         synth.speak(u);
       } catch (e) {}
@@ -142,6 +147,7 @@
       const act = a.dataset.a;
       if (act === "next") next(); else if (act === "prev") prev(); else if (act === "play") setPaused(!paused);
       else if (act === "snd") { snd = !snd; a.textContent = snd ? "🔊" : "🔇"; if (snd) speak(scenes[idx].say); else try { synth.cancel(); } catch (er) {} }
+      else if (act === "voice") { const cs = combos(); vsel = (vsel + 1) % (cs.length || 1); try { localStorage.setItem("pl_voice", vsel); } catch (er) {} snd = true; el.querySelector('[data-a="snd"]').textContent = "🔊"; const t = el.querySelector(".vid-bar span"), old = o.title || "Видео-урок"; t.textContent = "Голос: " + ((cs[vsel] || {}).label || "по умолчанию"); setTimeout(() => t.textContent = old, 2500); speak("Привет! Я Стрелка. Так я буду звучать."); }
       else if (act === "again") show(0);
       else if (act === "close") close();
       else if (act === "cta") { const f = o.cta.fn; close(); if (f) f(); }

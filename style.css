@@ -451,3 +451,64 @@ body{background:
 .mic-big b .ico{font-size:40px;vertical-align:middle}
 .done-mark .ico,.t-check .ico{font-size:.95em}
 .meal-h .ico,.seg .ico,.pill .ico{font-size:1.15em;vertical-align:-.22em;margin-right:2px}
+
+/* ============ темы: строгий дизайн (по умолчанию – живой) ============ */
+html[data-theme="strict"],html[data-theme="paper"],html[data-theme="dark"]{--radius:14px;--shadow:none}
+html[data-theme] body{background:var(--bg)}
+html[data-theme] .card,html[data-theme] .task,html[data-theme] .tabs,html[data-theme] .icon-btn,html[data-theme] .badge{box-shadow:none;border:1px solid var(--line)}
+html[data-theme] .card.sky{border:none}
+html[data-theme] .btn,html[data-theme] .t-btn,html[data-theme] .tabs button.on,html[data-theme] .seg button.on{box-shadow:none;background:var(--acc)}
+html[data-theme] .btn.ghost{background:var(--sky);color:var(--navy)}
+html[data-theme] .t-btn::after,html[data-theme] .btn::after{display:none}
+html[data-theme] .hero{border-radius:18px;box-shadow:none;background:var(--hero)}
+html[data-theme] .hero::before,html[data-theme] .hero::after,html[data-theme] .hero .hero-pet::before{display:none}
+html[data-theme] .card.blue{background:var(--hero)} html[data-theme] .card.blue::after{display:none}
+html[data-theme] .task::before{width:3px;background:var(--acc)!important}
+html[data-theme] .t-ic,html[data-theme] .lesson-card .ic,html[data-theme] .ch .ic{background:var(--sky)!important;border-radius:12px}
+html[data-theme] .sec-head h2{background:none;color:var(--navy);-webkit-text-fill-color:var(--navy)}
+html[data-theme] .tabs{border-radius:18px;background:var(--card);backdrop-filter:none}
+html[data-theme] .top{background:var(--bg);backdrop-filter:none;border-bottom:1px solid var(--line)}
+html[data-theme] .sheet{background:var(--card);color:var(--text)}
+html[data-theme] .photo-btn{background:var(--acc);box-shadow:none} html[data-theme] .voice-btn{background:var(--navy);box-shadow:none}
+html[data-theme] .mic-big{background:var(--acc);box-shadow:none}
+html[data-theme] .lv-poster,html[data-theme] .vid-bg{background:var(--hero)!important}
+html[data-theme] .vid-bg::before,html[data-theme] .vid-bg::after{display:none}
+html[data-theme] .t-vid{background:transparent;border:1px solid var(--line);color:var(--navy)}
+html[data-theme] .tabs svg{stroke-width:1.7}
+
+html[data-theme="strict"]{--bg:#F4F6F4;--card:#FFFFFF;--navy:#1E2B23;--text:#1E2B23;--muted:#66736B;--line:#DDE3DE;--sky:#EDF2EE;--acc:#2F6B45;--hero:#23412E}
+html[data-theme="paper"]{--bg:#F1EEE6;--card:#FBFAF6;--navy:#1F2A22;--text:#1F2A22;--muted:#6F7167;--line:#DDD7C8;--sky:#ECE8DA;--acc:#355E3B;--hero:#2C3A2F;--head:Georgia,"Times New Roman",serif}
+html[data-theme="paper"] h1,html[data-theme="paper"] h2,html[data-theme="paper"] h3{font-weight:700}
+html[data-theme="dark"]{--bg:#101612;--card:#18211B;--navy:#E6EFE8;--text:#DCE7DF;--muted:#8FA196;--line:#263229;--sky:#212D25;--acc:#4FA36B;--hero:#1D3425;color-scheme:dark}
+html[data-theme="dark"] .tabs button{color:#8FA196} html[data-theme="dark"] .task.done{background:#1B2B20;border-color:#2B4533}
+html[data-theme="dark"] .quiz-opt,html[data-theme="dark"] .inp,html[data-theme="dark"] .item{color:var(--text)}
+html[data-theme="dark"] .inp{background:#121A15;border-color:var(--line)} html[data-theme="dark"] .sos{background:#2A1A16;border-color:#4A2B22}
+html[data-theme="dark"] .t-ic,html[data-theme="dark"] .lesson-card .ic{filter:none}
+html[data-theme="dark"] .task,html[data-theme="dark"] .qa,html[data-theme="dark"] .tile,html[data-theme="dark"] .habit,html[data-theme="dark"] .icon-btn,html[data-theme="dark"] .badge,html[data-theme="dark"] .card,html[data-theme="dark"] .tabs,html[data-theme="dark"] .vid-say{background:var(--card);color:var(--text)}
+html[data-theme="dark"] .badge.ok{background:var(--acc)} html[data-theme="dark"] .task.done{background:#1B2B20}
+html[data-theme="dark"] .card.sky,html[data-theme="dark"] .btn.ghost{background:var(--sky);color:var(--text)} html[data-theme="dark"] .card.blue{background:var(--hero)}
+html[data-theme="dark"] .t-body span,html[data-theme="dark"] .qa i,html[data-theme="dark"] .muted{color:var(--muted)}
+html[data-theme="dark"] .bar{background:#263229} html[data-theme="dark"] .promo{background:#2A2615;color:#F2D98A}
+html[data-theme="dark"] .t-vid{color:var(--text)} html[data-theme="dark"] .top{background:var(--bg)} html[data-theme="dark"] .brand{color:var(--navy)}
+html[data-theme="dark"] .qa b,html[data-theme="dark"] .qa span,html[data-theme="dark"] .tile span{color:var(--text)}
+
+/* больше воздуха */
+main{padding:10px 20px 128px!important}
+.card{padding:20px;margin-bottom:18px}
+.tasks{gap:14px}
+.task{padding:16px 16px 16px 18px;gap:16px;margin-bottom:0}
+.t-body{gap:6px} .t-vid{margin-top:4px}
+.sec-head{margin:26px 0 14px}
+.hero{padding:22px 22px 24px;margin:8px 0 28px}
+.quick,.tiles{gap:14px;margin-bottom:18px}
+.qa,.tile{padding:16px}
+.item{padding:15px 0}
+.eyebrow{margin-bottom:8px}
+h2{margin-bottom:4px}
+.top{padding:12px 20px} .top-actions{gap:10px}
+.habits{gap:12px;margin-bottom:18px} .meal.card{padding:16px 18px}
+.sheet{padding:20px 22px 28px}
+.tabs{left:16px;right:16px}
+.note{padding:14px 16px;margin:12px 0 20px}
+.chips{gap:8px}
+.lv-info{padding:20px}

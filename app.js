@@ -19,6 +19,10 @@
     // Свайп вниз в Telegram сворачивает приложение и «перехватывает» нажатия на поля ввода – отключаем его
     try { if (tg.isVersionAtLeast && tg.isVersionAtLeast("7.7") && tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch (e) {}
   }
+  try { const th = new URLSearchParams(location.search).get("theme") || localStorage.getItem("pl_theme"); if (th === "dark") document.documentElement.dataset.theme = "dark"; } catch (e) {}
+  const applyTheme = t => { if (t === "dark") document.documentElement.dataset.theme = "dark"; else delete document.documentElement.dataset.theme; try { localStorage.setItem("pl_theme", t); } catch (e) {} const c = t === "dark" ? "#101612" : "#F3F7F2"; try { tg && tg.setHeaderColor(c); tg && tg.setBackgroundColor(c); } catch (e) {} const b = document.getElementById("themeBtn"); if (b) b.innerHTML = t === "dark" ? SUN : MOON; };
+  const MOON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg>';
+  const SUN = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
   const P = window.PRODUCTS, L = window.LESSONS, KT = window.KNOWLEDGE_TEST, CH = window.CHALLENGES;
   const TD = window.TASK_DAYS, STAGES = window.PET_STAGES, TIPS = window.PET_TIPS, BADGES = window.BADGES;
   const $ = (s, r = document) => r.querySelector(s);
@@ -570,7 +574,7 @@
       const extra = x.id === "w" && !ok ? `<div class="t-prog">${bar(ts.water, 6)}<span>${ts.water}/6</span></div>` : "";
       return `<div class="task ${ok ? "done" : ""}" data-t="${x.id}">
         <div class="t-ic">${x.icon}</div>
-        <div class="t-body"><b>${esc(title)}</b><button class="t-vid" data-v="${x.id}"><i>▶</i> Видео со Стрелкой</button>${extra}</div>
+        <div class="t-body"><b>${esc(title)}</b><button class="t-vid" data-v="${x.id}"><i>▶</i> Видео</button>${extra}</div>
         ${ok ? `<div class="t-check">✓</div>` : `<button class="t-btn" data-go="${x.go}">${x.act}</button>`}</div>`;
     };
     view.innerHTML = `
@@ -1222,6 +1226,8 @@
     mo.observe(document.body, { childList: true, subtree: true });
     PLIcon.swapAll(document.body);
   }
+
+  { const tb = document.getElementById("themeBtn"); if (tb) { tb.innerHTML = document.documentElement.dataset.theme === "dark" ? SUN : MOON; tb.onclick = () => { haptic(); applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); }; } }
 
   // для автотестов
   window.__pitlab = { calcNorm, Store, weekSummary, syncPayload, startTour, celebrate, petLevel, tasksDone, badgeState, feedPet, gymCheckin, petSVG };
