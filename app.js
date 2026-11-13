@@ -5,10 +5,10 @@
   "use strict";
 
   // Telegram может держать в кэше старый index.html без новых файлов – тогда догружаем их сами
-  if (!window.TASK_DAYS || !window.BADGES) {
+  if (!window.TASK_DAYS || !window.BADGES || !window.PLVideo || !window.PLVoice || !window.PLIcon) {
     const r = Date.now(), add = (src, cb) => { const x = document.createElement("script"); x.src = src + "?r=" + r; x.onload = cb; document.body.appendChild(x); };
     if (!document.querySelector('link[href^="style.css?"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "style.css?r=" + r; document.head.appendChild(l); }
-    add("products.js", () => add("tasks.js", () => add("app.js", () => {})));
+    add("products.js", () => add("tasks.js", () => add("icons.js", () => add("voice.js", () => add("video.js", () => add("app.js", () => {}))))));
     return;
   }
 
@@ -570,7 +570,7 @@
       const extra = x.id === "w" && !ok ? `<div class="t-prog">${bar(ts.water, 6)}<span>${ts.water}/6</span></div>` : "";
       return `<div class="task ${ok ? "done" : ""}" data-t="${x.id}">
         <div class="t-ic">${x.icon}</div>
-        <div class="t-body"><b>${esc(title)}</b><span>${esc(hint)}</span>${extra}</div>
+        <div class="t-body"><b>${esc(title)}</b><button class="t-vid" data-v="${x.id}"><i>▶</i> Видео со Стрелкой</button>${extra}</div>
         ${ok ? `<div class="t-check">✓</div>` : `<button class="t-btn" data-go="${x.go}">${x.act}</button>`}</div>`;
     };
     view.innerHTML = `
@@ -601,6 +601,7 @@
         <button class="tile" id="openBadges"><b>🏅</b><span>Значки</span><i id="bdgN">${Object.keys(getObj("badges", {})).length}/${BADGES.length}</i></button>
       </div>
       ${!test.before ? `<button class="card promo slim" id="testBefore"><span>📝 Тест «до» – 10 вопросов</span><b>Пройти ›</b></button>` : ""}`;
+    $$(".t-vid").forEach(b => b.onclick = e => { e.stopPropagation(); haptic(); playTask(b.dataset.v, plan); });
     $$(".t-btn").forEach(b => b.onclick = e => {
       e.stopPropagation(); haptic();
       const g = b.dataset.go;
@@ -661,7 +662,7 @@
       ${MEALS.map(m => {
         const es = d.e.map((e, i) => ({ e, i })).filter(x => x.e.ml === m.id);
         const mk = es.reduce((a, x) => a + entryNutr(x.e).k, 0);
-        return `<div class="card meal slim"><div class="meal-h"><span>${m.icon} ${m.label}</span><span class="muted small">${mk ? r0(mk) + " ккал" : ""}</span><button class="add plus" data-m="${m.id}" aria-label="Добавить">+</button></div>
+        return `<div class="card meal slim"><div class="meal-h"><span>${m.icon} ${m.label}</span><span class="muted small">${mk ? r0(mk) + " ккал" : ""}</span><button class="add mic" data-m="${m.id}" aria-label="Сказать голосом">🎙</button><button class="add plus" data-m="${m.id}" aria-label="Добавить">+</button></div>
           ${es.length ? `<div class="list">${es.map(x => { const nn = entryNutr(x.e); return `<div class="item"><div><div class="t">${esc(nn.n)}</div><div class="s">${x.e.g} г · ${r0(nn.k)} ккал</div></div><button class="del" data-i="${x.i}" aria-label="Удалить">×</button></div>`; }).join("")}</div>` : ""}</div>`;
       }).join("")}
       <div class="card"><div class="row between"><b>💧 Вода · ${d.w}/6</b>
@@ -673,7 +674,8 @@
       </div>`;
     $("#prevD").onclick = () => { diaryDate = addDays(diaryDate, -1); renderDiary(); };
     $("#nextD").onclick = () => { if (!isToday) { diaryDate = addDays(diaryDate, 1); renderDiary(); } };
-    $$(".add").forEach(b => b.onclick = () => openAdd(b.dataset.m));
+    $$(".add.plus").forEach(b => b.onclick = () => openAdd(b.dataset.m));
+    $$(".add.mic").forEach(b => b.onclick = () => openVoice(b.dataset.m));
     $$(".del").forEach(b => b.onclick = () => { const dd = getDay(k); dd.e.splice(+b.dataset.i, 1); setDay(k, dd); renderDiary(); });
     $("#wPlus").onclick = () => { const dd = getDay(k); dd.w = Math.min(12, dd.w + 1); setDay(k, dd); haptic(); if (isToday) checkAwards(); renderDiary(); };
     $("#wMinus").onclick = () => { const dd = getDay(k); dd.w = Math.max(0, dd.w - 1); setDay(k, dd); renderDiary(); };
@@ -746,6 +748,7 @@
     meal = meal || defaultMeal();
     openSheet(`<h2>Добавить еду</h2>
       <div class="seg" id="aMeal" style="margin:10px 0">${MEALS.map(m => `<button data-v="${m.id}" class="${m.id === meal ? "on" : ""}">${m.icon} ${m.label}</button>`).join("")}</div>
+      <button class="voice-btn" id="aVoice"><b>🎙</b><span><strong>Сказать голосом</strong><i>«Два яйца, овсянка 200 грамм и банан»</i></span></button>
       <button class="photo-btn" id="aPhoto"><b>📷</b><span><strong>Посчитать по фото</strong><i>Сфоткай тарелку – Стрелка определит КБЖУ</i></span></button>
       <input class="inp" id="aQ" placeholder="Поиск среди ${P.length} продуктов…" autocomplete="off">
       <div class="chips" id="aCat">${FOOD_CATS.map((c, i) => `<button data-c="${c[0]}" class="${i ? "" : "on"}">${c[1]}</button>`).join("")}</div>
@@ -755,6 +758,7 @@
       const list = $("#aList", sh); let cat = "";
       $$("#aCat button", sh).forEach(b => b.onclick = () => { cat = b.dataset.c; $$("#aCat button", sh).forEach(x => x.classList.toggle("on", x === b)); draw(); });
       $("#aPhoto", sh).onclick = () => openPhoto(meal);
+      $("#aVoice", sh).onclick = () => openVoice(meal);
       const draw = () => {
         const words = norm($("#aQ", sh).value).split(/\s+/).filter(Boolean).map(w => w.length > 4 ? w.slice(0, w.length > 6 ? 5 : 4) : w);
         const res = P.map((x, i) => ({ x, i, t: norm(x.n) }))
@@ -800,6 +804,65 @@
         addEntry({ i: -1, n, k: v("cK"), p: v("cP"), f: v("cF"), c: v("cC"), g: v("cG"), ml: meal });
       };
     });
+  }
+  // ---------------------------------------------------------------- Голосовой ввод
+  function openVoice(meal) {
+    meal = meal || defaultMeal();
+    const can = PLVoice.supported();
+    openSheet(`<h2>Скажи, что съел</h2>
+      <div class="seg" id="vMeal" style="margin:10px 0">${MEALS.map(m => `<button data-v="${m.id}" class="${m.id === meal ? "on" : ""}">${m.icon} ${m.label}</button>`).join("")}</div>
+      <div class="mic-zone"><button class="mic-big" id="vMic" aria-label="Говорить"><span class="mic-ring"></span><span class="mic-ring r2"></span><b>🎙</b></button>
+        <div class="mic-hint" id="vHint">${can ? "Нажми и говори: «два яйца и овсянка 200 грамм»" : "Напиши или продиктуй клавиатурой телефона (значок микрофона на клавиатуре)"}</div></div>
+      <textarea class="inp" id="vTxt" rows="2" placeholder="Например: гречка 150 грамм, куриная грудка и огурец"></textarea>
+      <div id="vRes"></div>
+      <button class="btn" id="vAdd" style="margin-top:12px" disabled>Добавить в дневник</button>`, sh => {
+      let items = [];
+      const txt = $("#vTxt", sh), res = $("#vRes", sh), add = $("#vAdd", sh);
+      $$("#vMeal button", sh).forEach(b => b.onclick = () => { meal = b.dataset.v; $$("#vMeal button", sh).forEach(x => x.classList.toggle("on", x === b)); });
+      const draw = () => {
+        const r = PLVoice.parse(txt.value, P, meal); items = r.items;
+        if (r.meal !== meal && /завтрак|обед|ужин|перекус|полдник/i.test(txt.value)) { meal = r.meal; $$("#vMeal button", sh).forEach(x => x.classList.toggle("on", x.dataset.v === meal)); }
+        const kk = items.reduce((a, o) => a + P[o.i].k * o.g / 100, 0);
+        res.innerHTML = (items.length ? `<div class="list" style="margin-top:10px">${items.map((o, n) => { const x = P[o.i]; return `<div class="item v-it"><div style="flex:1;min-width:0"><div class="t">${esc(x.n)}</div><div class="s">${r0(x.k * o.g / 100)} ккал · Б ${r1(x.p * o.g / 100)} Ж ${r1(x.f * o.g / 100)} У ${r1(x.c * o.g / 100)}</div></div>
+            <input class="inp v-g" data-n="${n}" type="number" inputmode="numeric" value="${o.g}"><span class="muted small">г</span><button class="del" data-n="${n}" aria-label="Убрать">×</button></div>`; }).join("")}</div>
+          <div class="card sky" style="margin:10px 0 0"><b>Итого ${r0(kk)} ккал</b></div>` : "")
+          + (r.miss.length ? `<p class="muted small" style="margin-top:8px">Не нашла в базе: ${r.miss.map(esc).join(", ")}. Добавь через поиск или «свой продукт».</p>` : "");
+        add.disabled = !items.length; add.textContent = items.length ? `Добавить в дневник (${items.length})` : "Добавить в дневник";
+        $$(".v-g", res).forEach(i => i.oninput = () => { items[+i.dataset.n].g = Math.max(1, Math.min(3000, +i.value || 0)); });
+        $$(".del", res).forEach(b => b.onclick = () => { const t = txt.value; items.splice(+b.dataset.n, 1); res.querySelectorAll(".v-it")[+b.dataset.n].remove(); add.disabled = !items.length; });
+      };
+      txt.oninput = draw;
+      const mic = $("#vMic", sh), hint = $("#vHint", sh); let rec = null, on = false;
+      mic.onclick = () => {
+        haptic("medium");
+        if (!can) { txt.focus(); return toast("Нажми на микрофон на клавиатуре и продиктуй"); }
+        if (on && rec) { try { rec.stop(); } catch (e) {} return; }
+        rec = PLVoice.recognizer(); if (!rec) { txt.focus(); return; }
+        let final = "";
+        rec.onstart = () => { on = true; mic.classList.add("rec"); hint.textContent = "Слушаю… говори"; };
+        rec.onresult = e => { let t = ""; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + " "; txt.value = t.trim(); final = t; draw(); };
+        rec.onerror = e => { on = false; mic.classList.remove("rec"); hint.textContent = e.error === "not-allowed" || e.error === "service-not-allowed" ? "Нет доступа к микрофону. Разреши его или напиши текстом." : e.error === "no-speech" ? "Ничего не услышала. Нажми ещё раз." : "Не получилось распознать. Напиши текстом или попробуй ещё раз."; };
+        rec.onend = () => { on = false; mic.classList.remove("rec"); if (final.trim()) hint.textContent = "Проверь граммы и нажми «Добавить»"; };
+        try { rec.start(); } catch (e) { hint.textContent = "Не удалось включить микрофон. Напиши текстом."; }
+      };
+      add.onclick = () => {
+        if (!items.length) return;
+        items.forEach(o => addEntry({ i: o.i, g: o.g, ml: meal }, true));
+        closeSheet(); haptic("medium"); toast(`Записано: ${items.length} ✓`);
+        const k = dkey(diaryDate); if (k === dkey()) checkAwards();
+        if (tab === "diary") renderDiary(); else render();
+      };
+    });
+  }
+  // ---------------------------------------------------------------- Видео-задания
+  function playTask(id, plan) {
+    const [title, hint] = plan[id], x = TASKS.find(t => t.id === id);
+    PLVideo.open({ title: "Задание дня", scenes: PLVideo.taskScenes(id, title, hint, plan.theme), pet: m => petSVG(m, Math.max(1, petLevel()), 230),
+      endTitle: title, endText: "Готов? Жми кнопку – и я подрасту!", closeLabel: "Позже",
+      cta: { label: x.act + " →", fn: () => { const g = x.go;
+        if (g === "breakfast") { diaryDate = new Date(); go("diary"); setTimeout(() => openAdd("b"), 60); }
+        else if (g === "water") { const k = dkey(), dd = getDay(k); dd.w = Math.min(12, dd.w + 1); setDay(k, dd); checkAwards(); renderHome(); }
+        else if (g === "plate") go("plate"); } } });
   }
   function addEntry(e, silent) {
     const k = dkey(diaryDate);
@@ -890,10 +953,16 @@
     const x = L.find(l => l.id === id); tab = "lessons"; markTabs();
     view.innerHTML = `
       <button class="btn small ghost" id="back">‹ Все уроки</button>
-      <div class="card" style="margin-top:10px"><div style="font-size:40px">${x.icon}</div><h2>${esc(x.title)}</h2>
-        <div style="margin-top:10px">${x.text.map(t => `<p>${esc(t)}</p>`).join("")}</div></div>
+      <div class="card lesson-vid" style="margin-top:10px"><div class="lv-poster" id="lvPlay"><div class="lv-pet">${petSVG("happy", Math.max(1, petLevel()), 120)}</div>
+          <div class="lv-ic">${x.icon}</div><button class="lv-play" aria-label="Смотреть">▶</button></div>
+        <div class="lv-info"><div class="eyebrow">Видео-урок · ${Math.max(1, Math.round(PLVideo.lessonScenes(x).reduce((a, b) => a + Math.max(2.8, b.say.length * 0.062), 0) / 10) * 10)} сек</div><h2>${esc(x.title)}</h2>
+        <button class="btn" id="lvBtn">▶ Смотреть со Стрелкой</button>
+        <details class="lv-text"><summary>Прочитать текстом</summary>${x.text.map(t => `<p>${esc(t)}</p>`).join("")}</details></div></div>
       <div class="card"><div class="eyebrow">Мини-тест</div><div id="quiz"></div></div>`;
     $("#back").onclick = () => go("lessons");
+    const play = () => PLVideo.open({ title: x.title, scenes: PLVideo.lessonScenes(x), pet: m => petSVG(m, Math.max(1, petLevel()), 230),
+      endTitle: "Урок посмотрен! 🎉", endText: "Теперь мини-тест из трёх вопросов – закрепим.", closeLabel: "К мини-тесту", cta: null });
+    $("#lvPlay").onclick = $("#lvBtn").onclick = () => { haptic(); play(); };
     let qi = 0, score = 0;
     const q = $("#quiz");
     const step = () => {
@@ -1145,6 +1214,14 @@
     if (start) return render();
     splash(() => render());
   });
+
+  // нарисованные иконки вместо эмодзи: заменяем автоматически во всём приложении
+  if (window.PLIcon) {
+    let busy = 0;
+    const mo = new MutationObserver(() => { if (busy) return; busy = requestAnimationFrame(() => { busy = 0; PLIcon.swapAll(document.body); }); });
+    mo.observe(document.body, { childList: true, subtree: true });
+    PLIcon.swapAll(document.body);
+  }
 
   // для автотестов
   window.__pitlab = { calcNorm, Store, weekSummary, syncPayload, startTour, celebrate, petLevel, tasksDone, badgeState, feedPet, gymCheckin, petSVG };
